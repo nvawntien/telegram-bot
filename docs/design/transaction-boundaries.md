@@ -4,6 +4,30 @@ Network calls are never made while a database transaction is open. Transactions
 are short, use explicit row locks, and commit business state together with any
 outbox/audit/ledger evidence needed to recover.
 
+## Implemented transaction primitive
+
+Phase 2 provides `postgres.Transactor`, backed directly by `pgxpool.Pool`:
+
+```go
+WithinTransaction(ctx, func(context.Context, *generated.Queries) error) error
+WithinTransactionOptions(ctx, pgx.TxOptions, func(context.Context, *generated.Queries) error) error
+```
+
+The default method uses explicit `pgx.TxOptions{}`; callers may select options
+when a future use case proves it needs them. A successful callback commits. A
+callback error triggers rollback and remains discoverable through `errors.Is`.
+If rollback also fails, both errors are joined. A panic triggers a bounded
+rollback with an uncancelled context and then re-panics with the original value.
+There is no global transaction or hidden retry/network behaviour.
+
+Real PostgreSQL tests prove commit, callback-error rollback, and panic rollback.
+The inventory and outbox tests also prove that two open transactions using
+`FOR UPDATE SKIP LOCKED` do not receive the same row.
+
+The sections below define the transaction boundaries for later application
+services; Phase 2 supplies their schema, typed SQL, and transaction mechanism,
+not the complete workflows.
+
 ## Create order
 
 One transaction:
@@ -111,4 +135,3 @@ back valid unrelated rows. Complete/partial/failed counts and bounded error JSON
 are committed at the end. Sheet stock never creates deliverable inventory
 unless rows contain valid encrypted-goods import data through the inventory use
 case.
-

@@ -6,9 +6,12 @@ as a Go modular monolith. The reference repository defines the Telegram product
 experience; this repository redesigns persistence, transactions, concurrency,
 idempotency, auditability, and recovery around PostgreSQL.
 
-Current status: **Phase 1 foundation complete**. Telegram shop features are
-documented and intentionally arrive phase-by-phase; there are no fake webhook
-handlers or plaintext inventory shortcuts in the foundation.
+Current status: **Phase 2 core database complete**. The repository now includes
+the constrained commerce schema, typed domain primitives, use-case-oriented
+sqlc queries, a pgx transaction runner, and PostgreSQL integration tests.
+Telegram/payment adapters and complete business flows intentionally arrive in
+later phases; there are no fake webhook handlers or plaintext inventory
+shortcuts.
 
 ## Architecture
 
@@ -43,7 +46,7 @@ External APIs are never called inside a database transaction. See the
 
 ## Start locally with Docker Compose
 
-The checked-in defaults are development-only and let the Phase 1 services boot
+The checked-in defaults are development-only and let the current services boot
 without real Telegram calls:
 
 ```bash
@@ -86,25 +89,30 @@ go run ./cmd/api
 go run ./cmd/worker
 ```
 
-Migration commands are `up`, `up-by-one`, `down`, `status`, and `version`.
+Migration commands are `up`, `up-by-one`, `down`, `down-to-zero`, `status`, and `version`.
 Production deployment should run `migrate up` as a one-shot release step before
 starting API/worker instances.
 
 ## Development checks
 
 ```bash
+docker compose up -d
+make migrate-up
+make sqlc
 make test
 make test-race
-make vet
-make build
+make test-integration
 make lint
-make sqlc
+make build
 ```
 
 `make sqlc` uses sqlc v1.30.0. Generated code is committed; CI regenerates it
-and fails on drift. `make lint` uses golangci-lint v2.8.0.
+and fails on drift. `make lint` uses golangci-lint v2.8.0. `make
+test-integration` connects to PostgreSQL through `INTEGRATION_DATABASE_URL`
+(defaulting to the local Compose database), creates a unique schema per test,
+runs migrations automatically, and removes the schema during cleanup.
 
-## Phase 1 endpoints
+## HTTP foundation endpoints
 
 | Method | Path | Purpose |
 |---|---|---|
@@ -118,8 +126,8 @@ recovers request panics, bounds headers and HTTP timeouts, and drains on
 
 ## Configuration
 
-All configuration is immutable after startup and validated before opening the
-service. Required variables:
+All configuration is immutable after startup and validated before opening a
+dependency. API configuration requires:
 
 - `DATABASE_URL`
 - `TELEGRAM_BOT_TOKEN`
@@ -132,15 +140,19 @@ Operational variables and defaults are documented in `.env.example`, including
 order expiry, delivery retry, logging, metrics, shutdown timeout, and pgx pool
 limits. Secrets are validated now even though their adapters land later, which
 prevents an unsafe production configuration from becoming accepted by default.
+The worker uses a separate loader and therefore does not require HTTP or webhook
+settings it does not consume. The migration process requires only
+`DATABASE_URL` and an optional `MIGRATIONS_DIR`.
 
 ## Design documents
 
 - [Node.js analysis and feature parity](docs/design/nodejs-parity.md)
-- [Database schema proposal](docs/design/database-schema.md)
+- [Implemented database schema](docs/design/database-schema.md)
 - [Order state machine](docs/design/order-state-machine.md)
 - [Transaction boundaries](docs/design/transaction-boundaries.md)
 - [Roadmap and risks](docs/design/roadmap-and-risks.md)
 - [Phase 1 completion report](docs/phase-1-report.md)
+- [Phase 2 completion report](docs/phase-2-report.md)
 
 ## Repository layout
 
@@ -153,6 +165,7 @@ internal/postgres/      pgx lifecycle and generated sqlc code
 internal/worker/        cancellable worker process foundation
 migrations/             goose schema history
 sqlc/queries/           typed SQL source
+tests/integration/      isolated-schema PostgreSQL integration tests
 docs/                   architecture, transactions, roadmap, reports
 ```
 
@@ -161,9 +174,8 @@ created when they gain working behaviour, not as empty skeletons.
 
 ## Current limitations
 
-- Telegram and payment webhook routes are not part of Phase 1.
-- Core business tables and repositories start in Phase 2.
+- Telegram and payment webhook routes are not part of Phase 2.
+- Phase 2 exposes persistence primitives but not complete order/payment services.
 - The worker currently monitors its PostgreSQL dependency; durable job types
-  start with the outbox/delivery phases.
+  and external delivery begin in later phases.
 - Compose values are suitable only for local development.
-

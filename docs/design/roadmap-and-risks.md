@@ -13,7 +13,7 @@
 Exit: unit tests/vet/build pass; migration and Compose boot are verified against
 real PostgreSQL.
 
-### Phase 2 — core database
+### Phase 2 — core database (implemented)
 
 1. Add schema in dependency order with constraints and partial indexes.
 2. Add domain Money/states/errors and transaction runner.
