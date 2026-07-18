@@ -24,9 +24,37 @@ Real PostgreSQL tests prove commit, callback-error rollback, and panic rollback.
 The inventory and outbox tests also prove that two open transactions using
 `FOR UPDATE SKIP LOCKED` do not receive the same row.
 
-The sections below define the transaction boundaries for later application
-services; Phase 2 supplies their schema, typed SQL, and transaction mechanism,
-not the complete workflows.
+## Telegram update claim and completion (implemented)
+
+Every update first claims its `telegram_update_receipts` row in a short
+transaction. One concurrent claimant changes a new, failed, or stale-processing
+row to `processing`; current-processing and completed duplicates return accepted
+duplicate semantics without dispatch. Failed work records a bounded error code
+and may be reclaimed. Processing older than `TELEGRAM_UPDATE_STALE_SECONDS` may
+also be reclaimed after a crash. This is at-least-once delivery with durable
+deduplication, not network exactly-once.
+
+Customer read flows complete the receipt before attempting the Telegram reply.
+For an admin catalog mutation, one transaction reauthorizes the database admin,
+locks and verifies session owner/expiry/version, validates the resource version,
+mutates the catalog, writes stable before/after audit JSON, completes the
+session, and completes the receipt. Any failure rolls the whole transaction
+back. The Telegram confirmation happens after commit and can never roll back
+the mutation.
+
+Starting, advancing, and cancelling durable admin sessions each use their own
+short request transaction. No transaction remains open while an operator types
+the next message. Optimistic session and resource versions reject stale or
+concurrent callbacks.
+
+Admin bootstrap upserts the configured Telegram user and ensures a missing
+owner admin record in one transaction. It never reactivates an existing revoked
+record. Bootstrap is intentionally idempotent and does not create a startup
+audit row, avoiding repeated audit noise; runtime authorization always reads
+`users` and `admins` from PostgreSQL.
+
+The sections below define transaction boundaries for later application
+services; they are not implemented in Phase 3.
 
 ## Create order
 

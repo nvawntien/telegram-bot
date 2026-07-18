@@ -23,7 +23,7 @@ real PostgreSQL.
 Exit: migrations round-trip; constraints reject invalid states/money; sqlc diff
 is clean; real-DB transaction tests pass.
 
-### Phase 3 — users, catalog, admin authorization, Telegram entry
+### Phase 3 — users, catalog, admin authorization, Telegram entry (implemented)
 
 1. Add go-telegram/bot webhook adapter and secret-token validation in Gin.
 2. Implement user upsert/ban and admin table/role checks.
@@ -31,8 +31,10 @@ is clean; real-DB transaction tests pass.
 4. Preserve `/start`, `/menu`, `/product(s)`, `/support`, `/myid` UI.
 5. Persist admin sessions before any multi-step wizard.
 
-Exit: unknown updates never panic; callbacks are authenticated; admin changes
-are audited; handlers contain no SQL/status writes.
+Exit achieved: unknown updates are safe; webhook/callback inputs are validated;
+runtime admin authorization and sessions are durable; concurrent updates are
+deduplicated; catalog changes, audit, session completion, and receipt completion
+are atomic; handlers contain no SQL/status writes.
 
 ### Phase 4 — encrypted inventory
 
