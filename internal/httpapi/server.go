@@ -13,6 +13,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/nvawntien/telegram-bot/internal/observability"
+	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
 
@@ -41,6 +42,7 @@ func NewServer(
 	cfg ServerConfig,
 	checker ReadinessChecker,
 	metrics *observability.HTTPMetrics,
+	gatherer prometheus.Gatherer,
 	logger *slog.Logger,
 ) *Server {
 	mode := gin.ReleaseMode
@@ -58,7 +60,7 @@ func NewServer(
 	router.GET("/health/live", liveHandler())
 	router.GET("/health/ready", readyHandler(checker, logger))
 	if cfg.PrometheusEnabled {
-		router.GET("/metrics", gin.WrapH(promhttp.Handler()))
+		router.GET("/metrics", gin.WrapH(promhttp.HandlerFor(gatherer, promhttp.HandlerOpts{})))
 	}
 	router.NoRoute(func(c *gin.Context) {
 		c.JSON(http.StatusNotFound, gin.H{"error": "not found"})

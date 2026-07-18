@@ -27,7 +27,7 @@ func main() {
 }
 
 func run(ctx context.Context) error {
-	cfg, err := config.Load()
+	cfg, err := config.LoadAPI()
 	if err != nil {
 		return err
 	}
@@ -55,6 +55,7 @@ func run(ctx context.Context) error {
 		},
 		postgres.NewChecker(pool, cfg.DatabaseHealthTimeout),
 		metrics,
+		prometheus.DefaultGatherer,
 		logger,
 	)
 

@@ -48,8 +48,25 @@ type MigrationConfig struct {
 	MigrationsDir string
 }
 
-// Load reads and validates API/worker configuration.
-func Load() (Config, error) {
+type processKind uint8
+
+const (
+	processAPI processKind = iota
+	processWorker
+)
+
+// LoadAPI reads and validates API configuration, including webhook settings.
+func LoadAPI() (Config, error) {
+	return load(processAPI)
+}
+
+// LoadWorker reads and validates worker configuration without requiring an HTTP
+// address or Telegram webhook URL/secret that the worker never consumes.
+func LoadWorker() (Config, error) {
+	return load(processWorker)
+}
+
+func load(process processKind) (Config, error) {
 	cfg := Config{
 		AppEnv:                 envOrDefault("APP_ENV", "local"),
 		HTTPAddr:               envOrDefault("HTTP_ADDR", defaultHTTPAddr),
@@ -83,7 +100,7 @@ func Load() (Config, error) {
 	assign(&problems, "DATABASE_CONNECTION_TTL_MINUTES", parsePositiveDuration(os.Getenv("DATABASE_CONNECTION_TTL_MINUTES"), time.Minute, cfg.DatabaseConnectionTTL), &cfg.DatabaseConnectionTTL)
 	assign(&problems, "DATABASE_HEALTH_TIMEOUT_SECONDS", parsePositiveDuration(os.Getenv("DATABASE_HEALTH_TIMEOUT_SECONDS"), time.Second, cfg.DatabaseHealthTimeout), &cfg.DatabaseHealthTimeout)
 
-	problems = append(problems, validate(cfg)...)
+	problems = append(problems, validate(cfg, process)...)
 	if err := errors.Join(problems...); err != nil {
 		return Config{}, fmt.Errorf("invalid configuration: %w", err)
 	}
@@ -119,13 +136,15 @@ func assign[T any](problems *[]error, name string, result parseResult[T], target
 	*target = result.value
 }
 
-func validate(cfg Config) []error {
+func validate(cfg Config, process processKind) []error {
 	var problems []error
 	required := map[string]string{
-		"DATABASE_URL":            cfg.DatabaseURL,
-		"TELEGRAM_BOT_TOKEN":      cfg.TelegramBotToken,
-		"TELEGRAM_WEBHOOK_SECRET": cfg.TelegramWebhookSecret,
-		"TELEGRAM_WEBHOOK_URL":    cfg.TelegramWebhookURL,
+		"DATABASE_URL":       cfg.DatabaseURL,
+		"TELEGRAM_BOT_TOKEN": cfg.TelegramBotToken,
+	}
+	if process == processAPI {
+		required["TELEGRAM_WEBHOOK_SECRET"] = cfg.TelegramWebhookSecret
+		required["TELEGRAM_WEBHOOK_URL"] = cfg.TelegramWebhookURL
 	}
 	for name, value := range required {
 		if value == "" {
@@ -133,13 +152,13 @@ func validate(cfg Config) []error {
 		}
 	}
 
-	if cfg.HTTPAddr == "" {
+	if process == processAPI && cfg.HTTPAddr == "" {
 		problems = append(problems, errors.New("HTTP_ADDR is required"))
 	}
-	if len(cfg.TelegramWebhookSecret) > 0 && len(cfg.TelegramWebhookSecret) < 16 {
+	if process == processAPI && len(cfg.TelegramWebhookSecret) > 0 && len(cfg.TelegramWebhookSecret) < 16 {
 		problems = append(problems, errors.New("TELEGRAM_WEBHOOK_SECRET must contain at least 16 characters"))
 	}
-	if cfg.TelegramWebhookURL != "" {
+	if process == processAPI && cfg.TelegramWebhookURL != "" {
 		webhookURL, err := url.ParseRequestURI(cfg.TelegramWebhookURL)
 		if err != nil || webhookURL.Host == "" {
 			problems = append(problems, errors.New("TELEGRAM_WEBHOOK_URL must be an absolute URL"))

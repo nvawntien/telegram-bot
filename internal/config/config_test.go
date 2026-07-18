@@ -14,9 +14,9 @@ func TestLoadValidConfig(t *testing.T) {
 	t.Setenv("ORDER_EXPIRE_MINUTES", "20")
 	t.Setenv("PROMETHEUS_ENABLED", "false")
 
-	cfg, err := Load()
+	cfg, err := LoadAPI()
 	if err != nil {
-		t.Fatalf("Load() error = %v", err)
+		t.Fatalf("LoadAPI() error = %v", err)
 	}
 	if len(cfg.AdminTelegramIDs) != 2 {
 		t.Fatalf("AdminTelegramIDs length = %d, want 2", len(cfg.AdminTelegramIDs))
@@ -36,9 +36,9 @@ func TestLoadReportsAllInvalidValues(t *testing.T) {
 	t.Setenv("DELIVERY_MAX_ATTEMPTS", "0")
 	t.Setenv("TELEGRAM_WEBHOOK_SECRET", "short")
 
-	_, err := Load()
+	_, err := LoadAPI()
 	if err == nil {
-		t.Fatal("Load() error = nil, want validation error")
+		t.Fatal("LoadAPI() error = nil, want validation error")
 	}
 	for _, expected := range []string{
 		"ADMIN_TELEGRAM_IDS",
@@ -47,7 +47,7 @@ func TestLoadReportsAllInvalidValues(t *testing.T) {
 		"TELEGRAM_WEBHOOK_SECRET",
 	} {
 		if !strings.Contains(err.Error(), expected) {
-			t.Errorf("Load() error %q does not contain %q", err, expected)
+			t.Errorf("LoadAPI() error %q does not contain %q", err, expected)
 		}
 	}
 }
@@ -57,9 +57,9 @@ func TestProductionWebhookRequiresHTTPS(t *testing.T) {
 	t.Setenv("APP_ENV", "production")
 	t.Setenv("TELEGRAM_WEBHOOK_URL", "http://example.test/webhooks/telegram")
 
-	_, err := Load()
+	_, err := LoadAPI()
 	if err == nil || !strings.Contains(err.Error(), "HTTPS") {
-		t.Fatalf("Load() error = %v, want HTTPS validation error", err)
+		t.Fatalf("LoadAPI() error = %v, want HTTPS validation error", err)
 	}
 }
 
@@ -67,9 +67,30 @@ func TestLoadRejectsConnectionCountOverflow(t *testing.T) {
 	setValidEnvironment(t)
 	t.Setenv("DATABASE_MAX_CONNECTIONS", "2147483648")
 
-	_, err := Load()
+	_, err := LoadAPI()
 	if err == nil || !strings.Contains(err.Error(), "DATABASE_MAX_CONNECTIONS") {
-		t.Fatalf("Load() error = %v, want connection overflow validation error", err)
+		t.Fatalf("LoadAPI() error = %v, want connection overflow validation error", err)
+	}
+}
+
+func TestLoadWorkerDoesNotRequireWebhookConfiguration(t *testing.T) {
+	setValidEnvironment(t)
+	t.Setenv("TELEGRAM_WEBHOOK_SECRET", "")
+	t.Setenv("TELEGRAM_WEBHOOK_URL", "")
+	t.Setenv("HTTP_ADDR", "")
+
+	if _, err := LoadWorker(); err != nil {
+		t.Fatalf("LoadWorker() error = %v", err)
+	}
+}
+
+func TestLoadAPIRequiresWebhookConfiguration(t *testing.T) {
+	setValidEnvironment(t)
+	t.Setenv("TELEGRAM_WEBHOOK_URL", "")
+
+	_, err := LoadAPI()
+	if err == nil || !strings.Contains(err.Error(), "TELEGRAM_WEBHOOK_URL") {
+		t.Fatalf("LoadAPI() error = %v, want webhook URL validation error", err)
 	}
 }
 
