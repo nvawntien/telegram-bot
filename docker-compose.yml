@@ -1,0 +1,74 @@
+x-app-environment: &app-environment
+  APP_ENV: local
+  DATABASE_URL: postgres://shop:shop@postgres:5432/shop?sslmode=disable
+  TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-local-development-token}
+  TELEGRAM_WEBHOOK_SECRET: ${TELEGRAM_WEBHOOK_SECRET:-local-development-secret}
+  TELEGRAM_WEBHOOK_URL: ${TELEGRAM_WEBHOOK_URL:-http://localhost:8080/webhooks/telegram}
+  ADMIN_TELEGRAM_IDS: ${ADMIN_TELEGRAM_IDS:-123456789}
+  INVENTORY_ENCRYPTION_KEY: ${INVENTORY_ENCRYPTION_KEY:-MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=}
+  ORDER_EXPIRE_MINUTES: ${ORDER_EXPIRE_MINUTES:-15}
+  DELIVERY_MAX_ATTEMPTS: ${DELIVERY_MAX_ATTEMPTS:-5}
+  DELIVERY_RETRY_BASE_SECONDS: ${DELIVERY_RETRY_BASE_SECONDS:-5}
+  LOG_LEVEL: ${LOG_LEVEL:-INFO}
+  PROMETHEUS_ENABLED: ${PROMETHEUS_ENABLED:-true}
+
+services:
+  postgres:
+    image: postgres:18-alpine
+    environment:
+      POSTGRES_DB: shop
+      POSTGRES_USER: shop
+      POSTGRES_PASSWORD: shop
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U shop -d shop"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped
+
+  migrate:
+    build: .
+    entrypoint: ["/app/migrate"]
+    command: ["up"]
+    environment:
+      DATABASE_URL: postgres://shop:shop@postgres:5432/shop?sslmode=disable
+      MIGRATIONS_DIR: /app/migrations
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: "no"
+
+  api:
+    build: .
+    environment:
+      <<: *app-environment
+      HTTP_ADDR: :8080
+    ports:
+      - "8080:8080"
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:8080/health/ready"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+
+  worker:
+    build: .
+    entrypoint: ["/app/worker"]
+    environment:
+      <<: *app-environment
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    restart: unless-stopped
+
+volumes:
+  postgres-data:
+
