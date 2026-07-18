@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/nvawntien/telegram-bot/internal/postgres/generated"
 )
 
 // PoolConfig contains explicit connection-pool limits.
@@ -48,18 +49,20 @@ func Open(ctx context.Context, cfg PoolConfig) (*pgxpool.Pool, error) {
 
 // Checker performs a bounded database readiness check.
 type Checker struct {
-	pool    *pgxpool.Pool
+	queries *generated.Queries
 	timeout time.Duration
 }
 
 // NewChecker creates a database checker.
 func NewChecker(pool *pgxpool.Pool, timeout time.Duration) *Checker {
-	return &Checker{pool: pool, timeout: timeout}
+	return &Checker{queries: generated.New(pool), timeout: timeout}
 }
 
-// Check returns nil only when PostgreSQL accepts a ping within the configured timeout.
+// Check returns nil only when PostgreSQL executes a typed health query within
+// the configured timeout.
 func (c *Checker) Check(ctx context.Context) error {
 	checkCtx, cancel := context.WithTimeout(ctx, c.timeout)
 	defer cancel()
-	return c.pool.Ping(checkCtx)
+	_, err := c.queries.DatabaseHealth(checkCtx)
+	return err
 }

@@ -63,6 +63,16 @@ func TestProductionWebhookRequiresHTTPS(t *testing.T) {
 	}
 }
 
+func TestLoadRejectsConnectionCountOverflow(t *testing.T) {
+	setValidEnvironment(t)
+	t.Setenv("DATABASE_MAX_CONNECTIONS", "2147483648")
+
+	_, err := Load()
+	if err == nil || !strings.Contains(err.Error(), "DATABASE_MAX_CONNECTIONS") {
+		t.Fatalf("Load() error = %v, want connection overflow validation error", err)
+	}
+}
+
 func setValidEnvironment(t *testing.T) {
 	t.Helper()
 	t.Setenv("APP_ENV", "local")

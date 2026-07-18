@@ -43,15 +43,17 @@ func NewServer(
 	metrics *observability.HTTPMetrics,
 	logger *slog.Logger,
 ) *Server {
-	if cfg.Environment == "production" {
-		gin.SetMode(gin.ReleaseMode)
+	mode := gin.ReleaseMode
+	if cfg.Environment == "test" {
+		mode = gin.TestMode
 	}
+	gin.SetMode(mode)
 	router := gin.New()
 	router.Use(
 		requestIDMiddleware(),
 		requestLogMiddleware(logger),
-		recoverMiddleware(logger),
 		metricsMiddleware(metrics),
+		recoverMiddleware(logger),
 	)
 	router.GET("/health/live", liveHandler())
 	router.GET("/health/ready", readyHandler(checker, logger))

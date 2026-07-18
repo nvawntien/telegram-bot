@@ -1,2 +1,2 @@
--- name: DatabaseTime :one
-SELECT CURRENT_TIMESTAMP;
+-- name: DatabaseHealth :one
+SELECT 1::bigint AS healthy;

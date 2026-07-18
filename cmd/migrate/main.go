@@ -37,7 +37,11 @@ func run(ctx context.Context, args []string) error {
 	if err != nil {
 		return fmt.Errorf("open migration database: %w", err)
 	}
-	defer database.Close()
+	defer func() {
+		if closeErr := database.Close(); closeErr != nil {
+			slog.Warn("close migration database", "error", closeErr)
+		}
+	}()
 
 	if err := database.PingContext(ctx); err != nil {
 		return fmt.Errorf("ping migration database: %w", err)

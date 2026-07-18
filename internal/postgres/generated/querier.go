@@ -9,7 +9,7 @@ import (
 )
 
 type Querier interface {
-	DatabaseTime(ctx context.Context) (interface{}, error)
+	DatabaseHealth(ctx context.Context) (int64, error)
 }
 
 var _ Querier = (*Queries)(nil)

@@ -202,11 +202,14 @@ func parsePositiveInt(raw string, fallback int) parseResult[int] {
 }
 
 func parsePositiveInt32(raw string, fallback int32) parseResult[int32] {
-	result := parsePositiveInt(raw, int(fallback))
-	if result.err != nil {
-		return parseResult[int32]{err: result.err}
+	if strings.TrimSpace(raw) == "" {
+		return parseResult[int32]{value: fallback}
 	}
-	return parseResult[int32]{value: int32(result.value)}
+	value, err := strconv.ParseInt(raw, 10, 32)
+	if err != nil || value <= 0 {
+		return parseResult[int32]{err: errors.New("must be a positive 32-bit integer")}
+	}
+	return parseResult[int32]{value: int32(value)}
 }
 
 func parseNonNegativeInt32(raw string, fallback int32) parseResult[int32] {

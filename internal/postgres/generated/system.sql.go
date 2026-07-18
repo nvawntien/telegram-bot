@@ -9,13 +9,13 @@ import (
 	"context"
 )
 
-const databaseTime = `-- name: DatabaseTime :one
-SELECT CURRENT_TIMESTAMP
+const databaseHealth = `-- name: DatabaseHealth :one
+SELECT 1::bigint AS healthy
 `
 
-func (q *Queries) DatabaseTime(ctx context.Context) (interface{}, error) {
-	row := q.db.QueryRow(ctx, databaseTime)
-	var column_1 interface{}
-	err := row.Scan(&column_1)
-	return column_1, err
+func (q *Queries) DatabaseHealth(ctx context.Context) (int64, error) {
+	row := q.db.QueryRow(ctx, databaseHealth)
+	var healthy int64
+	err := row.Scan(&healthy)
+	return healthy, err
 }
