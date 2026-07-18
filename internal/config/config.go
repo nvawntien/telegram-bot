@@ -14,32 +14,43 @@ import (
 )
 
 const (
-	defaultHTTPAddr       = ":8080"
-	defaultShutdownWindow = 10 * time.Second
-	defaultOrderExpiry    = 15 * time.Minute
-	defaultRetryBase      = 5 * time.Second
+	defaultHTTPAddr                 = ":8080"
+	defaultShutdownWindow           = 10 * time.Second
+	defaultOrderExpiry              = 15 * time.Minute
+	defaultRetryBase                = 5 * time.Second
+	defaultWebhookBodyLimit   int64 = 1 << 20
+	defaultWebhookTimeout           = 5 * time.Second
+	defaultUpdateStaleAfter         = 2 * time.Minute
+	defaultAdminSessionTTL          = 15 * time.Minute
+	defaultTelegramAPITimeout       = 5 * time.Second
 )
 
 // Config is immutable after startup and is passed explicitly to process dependencies.
 type Config struct {
-	AppEnv                 string
-	HTTPAddr               string
-	DatabaseURL            string
-	TelegramBotToken       string
-	TelegramWebhookSecret  string
-	TelegramWebhookURL     string
-	AdminTelegramIDs       []int64
-	InventoryEncryptionKey []byte
-	OrderExpiry            time.Duration
-	DeliveryMaxAttempts    int
-	DeliveryRetryBase      time.Duration
-	LogLevel               slog.Level
-	PrometheusEnabled      bool
-	ShutdownTimeout        time.Duration
-	DatabaseMaxConnections int32
-	DatabaseMinConnections int32
-	DatabaseConnectionTTL  time.Duration
-	DatabaseHealthTimeout  time.Duration
+	AppEnv                   string
+	HTTPAddr                 string
+	DatabaseURL              string
+	TelegramBotToken         string
+	TelegramWebhookSecret    string
+	TelegramWebhookURL       string
+	TelegramWebhookBodyLimit int64
+	TelegramWebhookTimeout   time.Duration
+	TelegramUpdateStaleAfter time.Duration
+	AdminSessionTTL          time.Duration
+	TelegramAPITimeout       time.Duration
+	SupportContact           string
+	AdminTelegramIDs         []int64
+	InventoryEncryptionKey   []byte
+	OrderExpiry              time.Duration
+	DeliveryMaxAttempts      int
+	DeliveryRetryBase        time.Duration
+	LogLevel                 slog.Level
+	PrometheusEnabled        bool
+	ShutdownTimeout          time.Duration
+	DatabaseMaxConnections   int32
+	DatabaseMinConnections   int32
+	DatabaseConnectionTTL    time.Duration
+	DatabaseHealthTimeout    time.Duration
 }
 
 // MigrationConfig contains only values required by the migration process.
@@ -68,22 +79,28 @@ func LoadWorker() (Config, error) {
 
 func load(process processKind) (Config, error) {
 	cfg := Config{
-		AppEnv:                 envOrDefault("APP_ENV", "local"),
-		HTTPAddr:               envOrDefault("HTTP_ADDR", defaultHTTPAddr),
-		DatabaseURL:            strings.TrimSpace(os.Getenv("DATABASE_URL")),
-		TelegramBotToken:       strings.TrimSpace(os.Getenv("TELEGRAM_BOT_TOKEN")),
-		TelegramWebhookSecret:  strings.TrimSpace(os.Getenv("TELEGRAM_WEBHOOK_SECRET")),
-		TelegramWebhookURL:     strings.TrimSpace(os.Getenv("TELEGRAM_WEBHOOK_URL")),
-		OrderExpiry:            defaultOrderExpiry,
-		DeliveryMaxAttempts:    5,
-		DeliveryRetryBase:      defaultRetryBase,
-		LogLevel:               slog.LevelInfo,
-		PrometheusEnabled:      true,
-		ShutdownTimeout:        defaultShutdownWindow,
-		DatabaseMaxConnections: 20,
-		DatabaseMinConnections: 2,
-		DatabaseConnectionTTL:  30 * time.Minute,
-		DatabaseHealthTimeout:  2 * time.Second,
+		AppEnv:                   envOrDefault("APP_ENV", "local"),
+		HTTPAddr:                 envOrDefault("HTTP_ADDR", defaultHTTPAddr),
+		DatabaseURL:              strings.TrimSpace(os.Getenv("DATABASE_URL")),
+		TelegramBotToken:         strings.TrimSpace(os.Getenv("TELEGRAM_BOT_TOKEN")),
+		TelegramWebhookSecret:    strings.TrimSpace(os.Getenv("TELEGRAM_WEBHOOK_SECRET")),
+		TelegramWebhookURL:       strings.TrimSpace(os.Getenv("TELEGRAM_WEBHOOK_URL")),
+		TelegramWebhookBodyLimit: defaultWebhookBodyLimit,
+		TelegramWebhookTimeout:   defaultWebhookTimeout,
+		TelegramUpdateStaleAfter: defaultUpdateStaleAfter,
+		AdminSessionTTL:          defaultAdminSessionTTL,
+		TelegramAPITimeout:       defaultTelegramAPITimeout,
+		SupportContact:           envOrDefault("SUPPORT_CONTACT", "Vui lòng liên hệ quản trị viên cửa hàng."),
+		OrderExpiry:              defaultOrderExpiry,
+		DeliveryMaxAttempts:      5,
+		DeliveryRetryBase:        defaultRetryBase,
+		LogLevel:                 slog.LevelInfo,
+		PrometheusEnabled:        true,
+		ShutdownTimeout:          defaultShutdownWindow,
+		DatabaseMaxConnections:   20,
+		DatabaseMinConnections:   2,
+		DatabaseConnectionTTL:    30 * time.Minute,
+		DatabaseHealthTimeout:    2 * time.Second,
 	}
 
 	var problems []error
@@ -99,6 +116,13 @@ func load(process processKind) (Config, error) {
 	assign(&problems, "DATABASE_MIN_CONNECTIONS", parseNonNegativeInt32(os.Getenv("DATABASE_MIN_CONNECTIONS"), cfg.DatabaseMinConnections), &cfg.DatabaseMinConnections)
 	assign(&problems, "DATABASE_CONNECTION_TTL_MINUTES", parsePositiveDuration(os.Getenv("DATABASE_CONNECTION_TTL_MINUTES"), time.Minute, cfg.DatabaseConnectionTTL), &cfg.DatabaseConnectionTTL)
 	assign(&problems, "DATABASE_HEALTH_TIMEOUT_SECONDS", parsePositiveDuration(os.Getenv("DATABASE_HEALTH_TIMEOUT_SECONDS"), time.Second, cfg.DatabaseHealthTimeout), &cfg.DatabaseHealthTimeout)
+	if process == processAPI {
+		assign(&problems, "TELEGRAM_WEBHOOK_BODY_LIMIT_BYTES", parsePositiveInt64(os.Getenv("TELEGRAM_WEBHOOK_BODY_LIMIT_BYTES"), cfg.TelegramWebhookBodyLimit), &cfg.TelegramWebhookBodyLimit)
+		assign(&problems, "TELEGRAM_WEBHOOK_TIMEOUT_SECONDS", parsePositiveDuration(os.Getenv("TELEGRAM_WEBHOOK_TIMEOUT_SECONDS"), time.Second, cfg.TelegramWebhookTimeout), &cfg.TelegramWebhookTimeout)
+		assign(&problems, "TELEGRAM_UPDATE_STALE_SECONDS", parsePositiveDuration(os.Getenv("TELEGRAM_UPDATE_STALE_SECONDS"), time.Second, cfg.TelegramUpdateStaleAfter), &cfg.TelegramUpdateStaleAfter)
+		assign(&problems, "ADMIN_SESSION_TTL_MINUTES", parsePositiveDuration(os.Getenv("ADMIN_SESSION_TTL_MINUTES"), time.Minute, cfg.AdminSessionTTL), &cfg.AdminSessionTTL)
+		assign(&problems, "TELEGRAM_API_TIMEOUT_SECONDS", parsePositiveDuration(os.Getenv("TELEGRAM_API_TIMEOUT_SECONDS"), time.Second, cfg.TelegramAPITimeout), &cfg.TelegramAPITimeout)
+	}
 
 	problems = append(problems, validate(cfg, process)...)
 	if err := errors.Join(problems...); err != nil {
@@ -166,6 +190,12 @@ func validate(cfg Config, process processKind) []error {
 			problems = append(problems, errors.New("TELEGRAM_WEBHOOK_URL must use HTTPS in production"))
 		}
 	}
+	if process == processAPI && (cfg.TelegramWebhookBodyLimit < 1024 || cfg.TelegramWebhookBodyLimit > 10<<20) {
+		problems = append(problems, errors.New("TELEGRAM_WEBHOOK_BODY_LIMIT_BYTES must be between 1024 and 10485760"))
+	}
+	if process == processAPI && (strings.TrimSpace(cfg.SupportContact) == "" || len([]rune(cfg.SupportContact)) > 200) {
+		problems = append(problems, errors.New("SUPPORT_CONTACT must contain 1 to 200 characters"))
+	}
 	if len(cfg.AdminTelegramIDs) == 0 {
 		problems = append(problems, errors.New("ADMIN_TELEGRAM_IDS must contain at least one positive ID"))
 	}
@@ -229,6 +259,17 @@ func parsePositiveInt32(raw string, fallback int32) parseResult[int32] {
 		return parseResult[int32]{err: errors.New("must be a positive 32-bit integer")}
 	}
 	return parseResult[int32]{value: int32(value)}
+}
+
+func parsePositiveInt64(raw string, fallback int64) parseResult[int64] {
+	if strings.TrimSpace(raw) == "" {
+		return parseResult[int64]{value: fallback}
+	}
+	value, err := strconv.ParseInt(raw, 10, 64)
+	if err != nil || value <= 0 {
+		return parseResult[int64]{err: errors.New("must be a positive 64-bit integer")}
+	}
+	return parseResult[int64]{value: value}
 }
 
 func parseNonNegativeInt32(raw string, fallback int32) parseResult[int32] {

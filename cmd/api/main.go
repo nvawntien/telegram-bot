@@ -9,10 +9,12 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/nvawntien/telegram-bot/internal/app"
 	"github.com/nvawntien/telegram-bot/internal/config"
 	"github.com/nvawntien/telegram-bot/internal/httpapi"
 	"github.com/nvawntien/telegram-bot/internal/observability"
 	"github.com/nvawntien/telegram-bot/internal/postgres"
+	telegramadapter "github.com/nvawntien/telegram-bot/internal/telegram"
 	"github.com/prometheus/client_golang/prometheus"
 )
 
@@ -47,6 +49,29 @@ func run(ctx context.Context) error {
 	defer pool.Close()
 
 	metrics := observability.NewHTTPMetrics(prometheus.DefaultRegisterer)
+	telegramMetrics := observability.NewTelegramMetrics(prometheus.DefaultRegisterer)
+	store := postgres.NewAppStore(pool)
+	userService := app.NewUserService(store)
+	catalogService := app.NewCatalogService(store, app.DefaultPageSize)
+	adminService := app.NewAdminService(store, cfg.AdminSessionTTL)
+	if err := adminService.Bootstrap(ctx, cfg.AdminTelegramIDs); err != nil {
+		return fmt.Errorf("bootstrap administrators: %w", err)
+	}
+	updateService := app.NewUpdateService(store, cfg.TelegramUpdateStaleAfter)
+	telegramClient, err := telegramadapter.NewClient(
+		cfg.TelegramBotToken, "", cfg.TelegramAPITimeout, 1<<20, telegramMetrics,
+	)
+	if err != nil {
+		return err
+	}
+	telegramRouter := telegramadapter.NewRouter(
+		userService, catalogService, adminService, updateService, telegramClient,
+		cfg.SupportContact, logger, telegramMetrics,
+	)
+	telegramWebhook := httpapi.NewTelegramWebhook(
+		cfg.TelegramWebhookSecret, cfg.TelegramWebhookBodyLimit,
+		cfg.TelegramWebhookTimeout, telegramRouter, telegramMetrics,
+	)
 	server := httpapi.NewServer(
 		httpapi.ServerConfig{
 			Address:           cfg.HTTPAddr,
@@ -56,6 +81,7 @@ func run(ctx context.Context) error {
 		postgres.NewChecker(pool, cfg.DatabaseHealthTimeout),
 		metrics,
 		prometheus.DefaultGatherer,
+		telegramWebhook,
 		logger,
 	)
 

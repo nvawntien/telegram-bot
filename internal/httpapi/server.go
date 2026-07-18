@@ -43,6 +43,7 @@ func NewServer(
 	checker ReadinessChecker,
 	metrics *observability.HTTPMetrics,
 	gatherer prometheus.Gatherer,
+	telegramWebhook *TelegramWebhook,
 	logger *slog.Logger,
 ) *Server {
 	mode := gin.ReleaseMode
@@ -61,6 +62,9 @@ func NewServer(
 	router.GET("/health/ready", readyHandler(checker, logger))
 	if cfg.PrometheusEnabled {
 		router.GET("/metrics", gin.WrapH(promhttp.HandlerFor(gatherer, promhttp.HandlerOpts{})))
+	}
+	if telegramWebhook != nil {
+		router.POST("/webhooks/telegram", telegramWebhook.Handler())
 	}
 	router.NoRoute(func(c *gin.Context) {
 		c.JSON(http.StatusNotFound, gin.H{"error": "not found"})
