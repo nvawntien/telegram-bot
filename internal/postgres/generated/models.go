@@ -30,16 +30,17 @@ type AdminSession struct {
 }
 
 type AuditLog struct {
-	ID           int64              `db:"id" json:"id"`
-	ActorType    string             `db:"actor_type" json:"actor_type"`
-	ActorID      pgtype.Int8        `db:"actor_id" json:"actor_id"`
-	Action       string             `db:"action" json:"action"`
-	ResourceType string             `db:"resource_type" json:"resource_type"`
-	ResourceID   pgtype.Int8        `db:"resource_id" json:"resource_id"`
-	BeforeData   []byte             `db:"before_data" json:"before_data"`
-	AfterData    []byte             `db:"after_data" json:"after_data"`
-	RequestID    pgtype.Text        `db:"request_id" json:"request_id"`
-	CreatedAt    pgtype.Timestamptz `db:"created_at" json:"created_at"`
+	ID               int64              `db:"id" json:"id"`
+	ActorType        string             `db:"actor_type" json:"actor_type"`
+	ActorID          pgtype.Int8        `db:"actor_id" json:"actor_id"`
+	Action           string             `db:"action" json:"action"`
+	ResourceType     string             `db:"resource_type" json:"resource_type"`
+	ResourceID       pgtype.Int8        `db:"resource_id" json:"resource_id"`
+	BeforeData       []byte             `db:"before_data" json:"before_data"`
+	AfterData        []byte             `db:"after_data" json:"after_data"`
+	RequestID        pgtype.Text        `db:"request_id" json:"request_id"`
+	CreatedAt        pgtype.Timestamptz `db:"created_at" json:"created_at"`
+	TelegramUpdateID pgtype.Int8        `db:"telegram_update_id" json:"telegram_update_id"`
 }
 
 type BankAccount struct {
@@ -95,6 +96,7 @@ type Category struct {
 	IsActive  bool               `db:"is_active" json:"is_active"`
 	CreatedAt pgtype.Timestamptz `db:"created_at" json:"created_at"`
 	UpdatedAt pgtype.Timestamptz `db:"updated_at" json:"updated_at"`
+	Version   int64              `db:"version" json:"version"`
 }
 
 type DeliveryAttempt struct {
@@ -269,6 +271,19 @@ type ShopSetting struct {
 	Version              int64              `db:"version" json:"version"`
 	CreatedAt            pgtype.Timestamptz `db:"created_at" json:"created_at"`
 	UpdatedAt            pgtype.Timestamptz `db:"updated_at" json:"updated_at"`
+}
+
+type TelegramUpdateReceipt struct {
+	UpdateID            int64              `db:"update_id" json:"update_id"`
+	UpdateType          string             `db:"update_type" json:"update_type"`
+	Status              string             `db:"status" json:"status"`
+	Attempts            int32              `db:"attempts" json:"attempts"`
+	ReceivedAt          pgtype.Timestamptz `db:"received_at" json:"received_at"`
+	ProcessingStartedAt pgtype.Timestamptz `db:"processing_started_at" json:"processing_started_at"`
+	ProcessedAt         pgtype.Timestamptz `db:"processed_at" json:"processed_at"`
+	LastError           pgtype.Text        `db:"last_error" json:"last_error"`
+	CreatedAt           pgtype.Timestamptz `db:"created_at" json:"created_at"`
+	UpdatedAt           pgtype.Timestamptz `db:"updated_at" json:"updated_at"`
 }
 
 type User struct {

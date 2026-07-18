@@ -11,6 +11,81 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const ensureBootstrapAdmin = `-- name: EnsureBootstrapAdmin :execrows
+INSERT INTO admins (user_id, role)
+VALUES ($1, 'owner')
+ON CONFLICT (user_id) DO NOTHING
+`
+
+func (q *Queries) EnsureBootstrapAdmin(ctx context.Context, userID int64) (int64, error) {
+	result, err := q.db.Exec(ctx, ensureBootstrapAdmin, userID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const ensureBootstrapUser = `-- name: EnsureBootstrapUser :one
+INSERT INTO users (telegram_user_id, last_seen_at)
+VALUES ($1, clock_timestamp())
+ON CONFLICT (telegram_user_id) DO UPDATE
+SET last_seen_at = clock_timestamp()
+RETURNING id, telegram_user_id, username, display_name, status, ban_reason, last_seen_at, created_at, updated_at
+`
+
+func (q *Queries) EnsureBootstrapUser(ctx context.Context, telegramUserID int64) (User, error) {
+	row := q.db.QueryRow(ctx, ensureBootstrapUser, telegramUserID)
+	var i User
+	err := row.Scan(
+		&i.ID,
+		&i.TelegramUserID,
+		&i.Username,
+		&i.DisplayName,
+		&i.Status,
+		&i.BanReason,
+		&i.LastSeenAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const getAdminAuthorizationByTelegramID = `-- name: GetAdminAuthorizationByTelegramID :one
+SELECT
+    admins.id AS admin_id,
+    admins.user_id,
+    users.telegram_user_id,
+    users.status AS user_status,
+    admins.role,
+    admins.is_active
+FROM admins
+JOIN users ON users.id = admins.user_id
+WHERE users.telegram_user_id = $1
+`
+
+type GetAdminAuthorizationByTelegramIDRow struct {
+	AdminID        int64  `db:"admin_id" json:"admin_id"`
+	UserID         int64  `db:"user_id" json:"user_id"`
+	TelegramUserID int64  `db:"telegram_user_id" json:"telegram_user_id"`
+	UserStatus     string `db:"user_status" json:"user_status"`
+	Role           string `db:"role" json:"role"`
+	IsActive       bool   `db:"is_active" json:"is_active"`
+}
+
+func (q *Queries) GetAdminAuthorizationByTelegramID(ctx context.Context, telegramUserID int64) (GetAdminAuthorizationByTelegramIDRow, error) {
+	row := q.db.QueryRow(ctx, getAdminAuthorizationByTelegramID, telegramUserID)
+	var i GetAdminAuthorizationByTelegramIDRow
+	err := row.Scan(
+		&i.AdminID,
+		&i.UserID,
+		&i.TelegramUserID,
+		&i.UserStatus,
+		&i.Role,
+		&i.IsActive,
+	)
+	return i, err
+}
+
 const getUserByTelegramID = `-- name: GetUserByTelegramID :one
 SELECT id, telegram_user_id, username, display_name, status, ban_reason, last_seen_at, created_at, updated_at
 FROM users
@@ -47,8 +122,8 @@ INSERT INTO users (
     clock_timestamp()
 )
 ON CONFLICT (telegram_user_id) DO UPDATE
-SET username = EXCLUDED.username,
-    display_name = EXCLUDED.display_name,
+SET username = COALESCE(EXCLUDED.username, users.username),
+    display_name = COALESCE(EXCLUDED.display_name, users.display_name),
     last_seen_at = clock_timestamp()
 RETURNING id, telegram_user_id, username, display_name, status, ban_reason, last_seen_at, created_at, updated_at
 `

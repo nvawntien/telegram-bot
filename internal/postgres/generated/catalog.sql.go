@@ -7,10 +7,212 @@ package generated
 
 import (
 	"context"
+
+	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const countActiveCategories = `-- name: CountActiveCategories :one
+SELECT count(*)::bigint FROM categories WHERE is_active = true
+`
+
+func (q *Queries) CountActiveCategories(ctx context.Context) (int64, error) {
+	row := q.db.QueryRow(ctx, countActiveCategories)
+	var column_1 int64
+	err := row.Scan(&column_1)
+	return column_1, err
+}
+
+const countActiveProductsByCategory = `-- name: CountActiveProductsByCategory :one
+SELECT count(*)::bigint
+FROM products
+JOIN categories ON categories.id = products.category_id
+WHERE products.category_id = $1
+  AND products.is_active = true
+  AND categories.is_active = true
+`
+
+func (q *Queries) CountActiveProductsByCategory(ctx context.Context, categoryID int64) (int64, error) {
+	row := q.db.QueryRow(ctx, countActiveProductsByCategory, categoryID)
+	var column_1 int64
+	err := row.Scan(&column_1)
+	return column_1, err
+}
+
+const countAdminCategories = `-- name: CountAdminCategories :one
+SELECT count(*)::bigint FROM categories
+`
+
+func (q *Queries) CountAdminCategories(ctx context.Context) (int64, error) {
+	row := q.db.QueryRow(ctx, countAdminCategories)
+	var column_1 int64
+	err := row.Scan(&column_1)
+	return column_1, err
+}
+
+const countAdminProducts = `-- name: CountAdminProducts :one
+SELECT count(*)::bigint FROM products
+`
+
+func (q *Queries) CountAdminProducts(ctx context.Context) (int64, error) {
+	row := q.db.QueryRow(ctx, countAdminProducts)
+	var column_1 int64
+	err := row.Scan(&column_1)
+	return column_1, err
+}
+
+const createCategory = `-- name: CreateCategory :one
+INSERT INTO categories (name, slug, sort_order)
+VALUES ($1, $2, $3)
+RETURNING id, name, slug, emoji, sort_order, is_active, created_at, updated_at, version
+`
+
+type CreateCategoryParams struct {
+	Name      string `db:"name" json:"name"`
+	Slug      string `db:"slug" json:"slug"`
+	SortOrder int32  `db:"sort_order" json:"sort_order"`
+}
+
+func (q *Queries) CreateCategory(ctx context.Context, arg CreateCategoryParams) (Category, error) {
+	row := q.db.QueryRow(ctx, createCategory, arg.Name, arg.Slug, arg.SortOrder)
+	var i Category
+	err := row.Scan(
+		&i.ID,
+		&i.Name,
+		&i.Slug,
+		&i.Emoji,
+		&i.SortOrder,
+		&i.IsActive,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.Version,
+	)
+	return i, err
+}
+
+const createProduct = `-- name: CreateProduct :one
+INSERT INTO products (
+    category_id, name, slug, description, price_vnd, delivery_type, contact_url
+) VALUES (
+    $1, $2, $3, $4,
+    $5, $6, $7
+)
+RETURNING id, category_id, name, slug, description, price_vnd, delivery_type, contact_url, is_active, version, created_at, updated_at
+`
+
+type CreateProductParams struct {
+	CategoryID   int64       `db:"category_id" json:"category_id"`
+	Name         string      `db:"name" json:"name"`
+	Slug         string      `db:"slug" json:"slug"`
+	Description  pgtype.Text `db:"description" json:"description"`
+	PriceVnd     int64       `db:"price_vnd" json:"price_vnd"`
+	DeliveryType string      `db:"delivery_type" json:"delivery_type"`
+	ContactUrl   pgtype.Text `db:"contact_url" json:"contact_url"`
+}
+
+func (q *Queries) CreateProduct(ctx context.Context, arg CreateProductParams) (Product, error) {
+	row := q.db.QueryRow(ctx, createProduct,
+		arg.CategoryID,
+		arg.Name,
+		arg.Slug,
+		arg.Description,
+		arg.PriceVnd,
+		arg.DeliveryType,
+		arg.ContactUrl,
+	)
+	var i Product
+	err := row.Scan(
+		&i.ID,
+		&i.CategoryID,
+		&i.Name,
+		&i.Slug,
+		&i.Description,
+		&i.PriceVnd,
+		&i.DeliveryType,
+		&i.ContactUrl,
+		&i.IsActive,
+		&i.Version,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const getActiveProductDetail = `-- name: GetActiveProductDetail :one
+SELECT products.id, products.category_id, products.name, products.slug, products.description, products.price_vnd, products.delivery_type, products.contact_url, products.is_active, products.version, products.created_at, products.updated_at
+FROM products
+JOIN categories ON categories.id = products.category_id
+WHERE products.id = $1
+  AND products.is_active = true
+  AND categories.is_active = true
+`
+
+func (q *Queries) GetActiveProductDetail(ctx context.Context, productID int64) (Product, error) {
+	row := q.db.QueryRow(ctx, getActiveProductDetail, productID)
+	var i Product
+	err := row.Scan(
+		&i.ID,
+		&i.CategoryID,
+		&i.Name,
+		&i.Slug,
+		&i.Description,
+		&i.PriceVnd,
+		&i.DeliveryType,
+		&i.ContactUrl,
+		&i.IsActive,
+		&i.Version,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const getCategoryByID = `-- name: GetCategoryByID :one
+SELECT id, name, slug, emoji, sort_order, is_active, created_at, updated_at, version FROM categories WHERE id = $1
+`
+
+func (q *Queries) GetCategoryByID(ctx context.Context, id int64) (Category, error) {
+	row := q.db.QueryRow(ctx, getCategoryByID, id)
+	var i Category
+	err := row.Scan(
+		&i.ID,
+		&i.Name,
+		&i.Slug,
+		&i.Emoji,
+		&i.SortOrder,
+		&i.IsActive,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.Version,
+	)
+	return i, err
+}
+
+const getProductByID = `-- name: GetProductByID :one
+SELECT id, category_id, name, slug, description, price_vnd, delivery_type, contact_url, is_active, version, created_at, updated_at FROM products WHERE id = $1
+`
+
+func (q *Queries) GetProductByID(ctx context.Context, id int64) (Product, error) {
+	row := q.db.QueryRow(ctx, getProductByID, id)
+	var i Product
+	err := row.Scan(
+		&i.ID,
+		&i.CategoryID,
+		&i.Name,
+		&i.Slug,
+		&i.Description,
+		&i.PriceVnd,
+		&i.DeliveryType,
+		&i.ContactUrl,
+		&i.IsActive,
+		&i.Version,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const listActiveCategories = `-- name: ListActiveCategories :many
-SELECT id, name, slug, emoji, sort_order, is_active, created_at, updated_at
+SELECT id, name, slug, emoji, sort_order, is_active, created_at, updated_at, version
 FROM categories
 WHERE is_active = true
 ORDER BY sort_order, id
@@ -34,6 +236,50 @@ func (q *Queries) ListActiveCategories(ctx context.Context) ([]Category, error) 
 			&i.IsActive,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.Version,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listActiveCategoriesPage = `-- name: ListActiveCategoriesPage :many
+SELECT id, name, slug, emoji, sort_order, is_active, created_at, updated_at, version
+FROM categories
+WHERE is_active = true
+ORDER BY sort_order, id
+LIMIT $2::integer OFFSET $1::integer
+`
+
+type ListActiveCategoriesPageParams struct {
+	PageOffset int32 `db:"page_offset" json:"page_offset"`
+	PageLimit  int32 `db:"page_limit" json:"page_limit"`
+}
+
+func (q *Queries) ListActiveCategoriesPage(ctx context.Context, arg ListActiveCategoriesPageParams) ([]Category, error) {
+	rows, err := q.db.Query(ctx, listActiveCategoriesPage, arg.PageOffset, arg.PageLimit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []Category{}
+	for rows.Next() {
+		var i Category
+		if err := rows.Scan(
+			&i.ID,
+			&i.Name,
+			&i.Slug,
+			&i.Emoji,
+			&i.SortOrder,
+			&i.IsActive,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.Version,
 		); err != nil {
 			return nil, err
 		}
@@ -84,4 +330,340 @@ func (q *Queries) ListActiveProductsByCategory(ctx context.Context, categoryID i
 		return nil, err
 	}
 	return items, nil
+}
+
+const listActiveProductsPage = `-- name: ListActiveProductsPage :many
+SELECT products.id, products.category_id, products.name, products.slug, products.description, products.price_vnd, products.delivery_type, products.contact_url, products.is_active, products.version, products.created_at, products.updated_at
+FROM products
+JOIN categories ON categories.id = products.category_id
+WHERE products.category_id = $1
+  AND products.is_active = true
+  AND categories.is_active = true
+ORDER BY products.id
+LIMIT $3::integer OFFSET $2::integer
+`
+
+type ListActiveProductsPageParams struct {
+	CategoryID int64 `db:"category_id" json:"category_id"`
+	PageOffset int32 `db:"page_offset" json:"page_offset"`
+	PageLimit  int32 `db:"page_limit" json:"page_limit"`
+}
+
+func (q *Queries) ListActiveProductsPage(ctx context.Context, arg ListActiveProductsPageParams) ([]Product, error) {
+	rows, err := q.db.Query(ctx, listActiveProductsPage, arg.CategoryID, arg.PageOffset, arg.PageLimit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []Product{}
+	for rows.Next() {
+		var i Product
+		if err := rows.Scan(
+			&i.ID,
+			&i.CategoryID,
+			&i.Name,
+			&i.Slug,
+			&i.Description,
+			&i.PriceVnd,
+			&i.DeliveryType,
+			&i.ContactUrl,
+			&i.IsActive,
+			&i.Version,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listAdminCategoriesPage = `-- name: ListAdminCategoriesPage :many
+SELECT id, name, slug, emoji, sort_order, is_active, created_at, updated_at, version
+FROM categories
+ORDER BY sort_order, id
+LIMIT $2::integer OFFSET $1::integer
+`
+
+type ListAdminCategoriesPageParams struct {
+	PageOffset int32 `db:"page_offset" json:"page_offset"`
+	PageLimit  int32 `db:"page_limit" json:"page_limit"`
+}
+
+func (q *Queries) ListAdminCategoriesPage(ctx context.Context, arg ListAdminCategoriesPageParams) ([]Category, error) {
+	rows, err := q.db.Query(ctx, listAdminCategoriesPage, arg.PageOffset, arg.PageLimit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []Category{}
+	for rows.Next() {
+		var i Category
+		if err := rows.Scan(
+			&i.ID,
+			&i.Name,
+			&i.Slug,
+			&i.Emoji,
+			&i.SortOrder,
+			&i.IsActive,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.Version,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listAdminProductsPage = `-- name: ListAdminProductsPage :many
+SELECT id, category_id, name, slug, description, price_vnd, delivery_type, contact_url, is_active, version, created_at, updated_at
+FROM products
+ORDER BY category_id, id
+LIMIT $2::integer OFFSET $1::integer
+`
+
+type ListAdminProductsPageParams struct {
+	PageOffset int32 `db:"page_offset" json:"page_offset"`
+	PageLimit  int32 `db:"page_limit" json:"page_limit"`
+}
+
+func (q *Queries) ListAdminProductsPage(ctx context.Context, arg ListAdminProductsPageParams) ([]Product, error) {
+	rows, err := q.db.Query(ctx, listAdminProductsPage, arg.PageOffset, arg.PageLimit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []Product{}
+	for rows.Next() {
+		var i Product
+		if err := rows.Scan(
+			&i.ID,
+			&i.CategoryID,
+			&i.Name,
+			&i.Slug,
+			&i.Description,
+			&i.PriceVnd,
+			&i.DeliveryType,
+			&i.ContactUrl,
+			&i.IsActive,
+			&i.Version,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const lockCategoryByID = `-- name: LockCategoryByID :one
+SELECT id, name, slug, emoji, sort_order, is_active, created_at, updated_at, version FROM categories WHERE id = $1 FOR UPDATE
+`
+
+func (q *Queries) LockCategoryByID(ctx context.Context, id int64) (Category, error) {
+	row := q.db.QueryRow(ctx, lockCategoryByID, id)
+	var i Category
+	err := row.Scan(
+		&i.ID,
+		&i.Name,
+		&i.Slug,
+		&i.Emoji,
+		&i.SortOrder,
+		&i.IsActive,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.Version,
+	)
+	return i, err
+}
+
+const lockProductByID = `-- name: LockProductByID :one
+SELECT id, category_id, name, slug, description, price_vnd, delivery_type, contact_url, is_active, version, created_at, updated_at FROM products WHERE id = $1 FOR UPDATE
+`
+
+func (q *Queries) LockProductByID(ctx context.Context, id int64) (Product, error) {
+	row := q.db.QueryRow(ctx, lockProductByID, id)
+	var i Product
+	err := row.Scan(
+		&i.ID,
+		&i.CategoryID,
+		&i.Name,
+		&i.Slug,
+		&i.Description,
+		&i.PriceVnd,
+		&i.DeliveryType,
+		&i.ContactUrl,
+		&i.IsActive,
+		&i.Version,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const setCategoryActiveGuarded = `-- name: SetCategoryActiveGuarded :one
+UPDATE categories
+SET is_active = $1,
+    version = version + 1
+WHERE id = $2
+  AND version = $3
+RETURNING id, name, slug, emoji, sort_order, is_active, created_at, updated_at, version
+`
+
+type SetCategoryActiveGuardedParams struct {
+	IsActive        bool  `db:"is_active" json:"is_active"`
+	ID              int64 `db:"id" json:"id"`
+	ExpectedVersion int64 `db:"expected_version" json:"expected_version"`
+}
+
+func (q *Queries) SetCategoryActiveGuarded(ctx context.Context, arg SetCategoryActiveGuardedParams) (Category, error) {
+	row := q.db.QueryRow(ctx, setCategoryActiveGuarded, arg.IsActive, arg.ID, arg.ExpectedVersion)
+	var i Category
+	err := row.Scan(
+		&i.ID,
+		&i.Name,
+		&i.Slug,
+		&i.Emoji,
+		&i.SortOrder,
+		&i.IsActive,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.Version,
+	)
+	return i, err
+}
+
+const setProductActiveGuarded = `-- name: SetProductActiveGuarded :one
+UPDATE products
+SET is_active = $1,
+    version = version + 1
+WHERE id = $2
+  AND version = $3
+RETURNING id, category_id, name, slug, description, price_vnd, delivery_type, contact_url, is_active, version, created_at, updated_at
+`
+
+type SetProductActiveGuardedParams struct {
+	IsActive        bool  `db:"is_active" json:"is_active"`
+	ID              int64 `db:"id" json:"id"`
+	ExpectedVersion int64 `db:"expected_version" json:"expected_version"`
+}
+
+func (q *Queries) SetProductActiveGuarded(ctx context.Context, arg SetProductActiveGuardedParams) (Product, error) {
+	row := q.db.QueryRow(ctx, setProductActiveGuarded, arg.IsActive, arg.ID, arg.ExpectedVersion)
+	var i Product
+	err := row.Scan(
+		&i.ID,
+		&i.CategoryID,
+		&i.Name,
+		&i.Slug,
+		&i.Description,
+		&i.PriceVnd,
+		&i.DeliveryType,
+		&i.ContactUrl,
+		&i.IsActive,
+		&i.Version,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const updateCategoryDetailsGuarded = `-- name: UpdateCategoryDetailsGuarded :one
+UPDATE categories
+SET name = $1,
+    sort_order = $2,
+    version = version + 1
+WHERE id = $3
+  AND version = $4
+RETURNING id, name, slug, emoji, sort_order, is_active, created_at, updated_at, version
+`
+
+type UpdateCategoryDetailsGuardedParams struct {
+	Name            string `db:"name" json:"name"`
+	SortOrder       int32  `db:"sort_order" json:"sort_order"`
+	ID              int64  `db:"id" json:"id"`
+	ExpectedVersion int64  `db:"expected_version" json:"expected_version"`
+}
+
+func (q *Queries) UpdateCategoryDetailsGuarded(ctx context.Context, arg UpdateCategoryDetailsGuardedParams) (Category, error) {
+	row := q.db.QueryRow(ctx, updateCategoryDetailsGuarded,
+		arg.Name,
+		arg.SortOrder,
+		arg.ID,
+		arg.ExpectedVersion,
+	)
+	var i Category
+	err := row.Scan(
+		&i.ID,
+		&i.Name,
+		&i.Slug,
+		&i.Emoji,
+		&i.SortOrder,
+		&i.IsActive,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.Version,
+	)
+	return i, err
+}
+
+const updateProductDetailsGuarded = `-- name: UpdateProductDetailsGuarded :one
+UPDATE products
+SET category_id = $1,
+    name = $2,
+    description = $3,
+    price_vnd = $4,
+    version = version + 1
+WHERE id = $5
+  AND version = $6
+RETURNING id, category_id, name, slug, description, price_vnd, delivery_type, contact_url, is_active, version, created_at, updated_at
+`
+
+type UpdateProductDetailsGuardedParams struct {
+	CategoryID      int64       `db:"category_id" json:"category_id"`
+	Name            string      `db:"name" json:"name"`
+	Description     pgtype.Text `db:"description" json:"description"`
+	PriceVnd        int64       `db:"price_vnd" json:"price_vnd"`
+	ID              int64       `db:"id" json:"id"`
+	ExpectedVersion int64       `db:"expected_version" json:"expected_version"`
+}
+
+func (q *Queries) UpdateProductDetailsGuarded(ctx context.Context, arg UpdateProductDetailsGuardedParams) (Product, error) {
+	row := q.db.QueryRow(ctx, updateProductDetailsGuarded,
+		arg.CategoryID,
+		arg.Name,
+		arg.Description,
+		arg.PriceVnd,
+		arg.ID,
+		arg.ExpectedVersion,
+	)
+	var i Product
+	err := row.Scan(
+		&i.ID,
+		&i.CategoryID,
+		&i.Name,
+		&i.Slug,
+		&i.Description,
+		&i.PriceVnd,
+		&i.DeliveryType,
+		&i.ContactUrl,
+		&i.IsActive,
+		&i.Version,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
 }
