@@ -3,3 +3,304 @@
 //   sqlc v1.30.0
 
 package generated
+
+import (
+	"github.com/jackc/pgx/v5/pgtype"
+)
+
+type Admin struct {
+	ID        int64              `db:"id" json:"id"`
+	UserID    int64              `db:"user_id" json:"user_id"`
+	Role      string             `db:"role" json:"role"`
+	IsActive  bool               `db:"is_active" json:"is_active"`
+	CreatedBy pgtype.Int8        `db:"created_by" json:"created_by"`
+	CreatedAt pgtype.Timestamptz `db:"created_at" json:"created_at"`
+	UpdatedAt pgtype.Timestamptz `db:"updated_at" json:"updated_at"`
+}
+
+type AdminSession struct {
+	ID        int64              `db:"id" json:"id"`
+	AdminID   int64              `db:"admin_id" json:"admin_id"`
+	State     string             `db:"state" json:"state"`
+	Payload   []byte             `db:"payload" json:"payload"`
+	ExpiresAt pgtype.Timestamptz `db:"expires_at" json:"expires_at"`
+	Version   int64              `db:"version" json:"version"`
+	CreatedAt pgtype.Timestamptz `db:"created_at" json:"created_at"`
+	UpdatedAt pgtype.Timestamptz `db:"updated_at" json:"updated_at"`
+}
+
+type AuditLog struct {
+	ID           int64              `db:"id" json:"id"`
+	ActorType    string             `db:"actor_type" json:"actor_type"`
+	ActorID      pgtype.Int8        `db:"actor_id" json:"actor_id"`
+	Action       string             `db:"action" json:"action"`
+	ResourceType string             `db:"resource_type" json:"resource_type"`
+	ResourceID   pgtype.Int8        `db:"resource_id" json:"resource_id"`
+	BeforeData   []byte             `db:"before_data" json:"before_data"`
+	AfterData    []byte             `db:"after_data" json:"after_data"`
+	RequestID    pgtype.Text        `db:"request_id" json:"request_id"`
+	CreatedAt    pgtype.Timestamptz `db:"created_at" json:"created_at"`
+}
+
+type BankAccount struct {
+	ID                       int64              `db:"id" json:"id"`
+	BankBin                  string             `db:"bank_bin" json:"bank_bin"`
+	BankName                 string             `db:"bank_name" json:"bank_name"`
+	AccountName              string             `db:"account_name" json:"account_name"`
+	EncryptedAccountNumber   []byte             `db:"encrypted_account_number" json:"encrypted_account_number"`
+	AccountNumberFingerprint []byte             `db:"account_number_fingerprint" json:"account_number_fingerprint"`
+	EncryptionKeyID          string             `db:"encryption_key_id" json:"encryption_key_id"`
+	DisplayLast4             string             `db:"display_last4" json:"display_last4"`
+	SortOrder                int32              `db:"sort_order" json:"sort_order"`
+	IsActive                 bool               `db:"is_active" json:"is_active"`
+	CreatedAt                pgtype.Timestamptz `db:"created_at" json:"created_at"`
+	UpdatedAt                pgtype.Timestamptz `db:"updated_at" json:"updated_at"`
+}
+
+type Broadcast struct {
+	ID           int64              `db:"id" json:"id"`
+	CreatedBy    int64              `db:"created_by" json:"created_by"`
+	Content      []byte             `db:"content" json:"content"`
+	Status       string             `db:"status" json:"status"`
+	ScheduledAt  pgtype.Timestamptz `db:"scheduled_at" json:"scheduled_at"`
+	StartedAt    pgtype.Timestamptz `db:"started_at" json:"started_at"`
+	FinishedAt   pgtype.Timestamptz `db:"finished_at" json:"finished_at"`
+	CancelledAt  pgtype.Timestamptz `db:"cancelled_at" json:"cancelled_at"`
+	TotalCount   int32              `db:"total_count" json:"total_count"`
+	SuccessCount int32              `db:"success_count" json:"success_count"`
+	FailedCount  int32              `db:"failed_count" json:"failed_count"`
+	CreatedAt    pgtype.Timestamptz `db:"created_at" json:"created_at"`
+	UpdatedAt    pgtype.Timestamptz `db:"updated_at" json:"updated_at"`
+}
+
+type BroadcastRecipient struct {
+	BroadcastID       int64              `db:"broadcast_id" json:"broadcast_id"`
+	UserID            int64              `db:"user_id" json:"user_id"`
+	Status            string             `db:"status" json:"status"`
+	Attempts          int32              `db:"attempts" json:"attempts"`
+	NextAttemptAt     pgtype.Timestamptz `db:"next_attempt_at" json:"next_attempt_at"`
+	TelegramMessageID pgtype.Int8        `db:"telegram_message_id" json:"telegram_message_id"`
+	LastErrorCode     pgtype.Text        `db:"last_error_code" json:"last_error_code"`
+	SentAt            pgtype.Timestamptz `db:"sent_at" json:"sent_at"`
+	CreatedAt         pgtype.Timestamptz `db:"created_at" json:"created_at"`
+	UpdatedAt         pgtype.Timestamptz `db:"updated_at" json:"updated_at"`
+}
+
+type Category struct {
+	ID        int64              `db:"id" json:"id"`
+	Name      string             `db:"name" json:"name"`
+	Slug      string             `db:"slug" json:"slug"`
+	Emoji     string             `db:"emoji" json:"emoji"`
+	SortOrder int32              `db:"sort_order" json:"sort_order"`
+	IsActive  bool               `db:"is_active" json:"is_active"`
+	CreatedAt pgtype.Timestamptz `db:"created_at" json:"created_at"`
+	UpdatedAt pgtype.Timestamptz `db:"updated_at" json:"updated_at"`
+}
+
+type DeliveryAttempt struct {
+	ID                int64              `db:"id" json:"id"`
+	OrderID           int64              `db:"order_id" json:"order_id"`
+	AttemptNumber     int32              `db:"attempt_number" json:"attempt_number"`
+	Channel           string             `db:"channel" json:"channel"`
+	Status            string             `db:"status" json:"status"`
+	TelegramMessageID pgtype.Int8        `db:"telegram_message_id" json:"telegram_message_id"`
+	ErrorCode         pgtype.Text        `db:"error_code" json:"error_code"`
+	ErrorDetail       pgtype.Text        `db:"error_detail" json:"error_detail"`
+	StartedAt         pgtype.Timestamptz `db:"started_at" json:"started_at"`
+	FinishedAt        pgtype.Timestamptz `db:"finished_at" json:"finished_at"`
+	CreatedAt         pgtype.Timestamptz `db:"created_at" json:"created_at"`
+	UpdatedAt         pgtype.Timestamptz `db:"updated_at" json:"updated_at"`
+}
+
+type InventoryItem struct {
+	ID                 int64              `db:"id" json:"id"`
+	ProductID          int64              `db:"product_id" json:"product_id"`
+	EncryptedPayload   []byte             `db:"encrypted_payload" json:"encrypted_payload"`
+	EncryptionKeyID    string             `db:"encryption_key_id" json:"encryption_key_id"`
+	PayloadFingerprint []byte             `db:"payload_fingerprint" json:"payload_fingerprint"`
+	Status             string             `db:"status" json:"status"`
+	ReservedOrderID    pgtype.Int8        `db:"reserved_order_id" json:"reserved_order_id"`
+	ReservedUntil      pgtype.Timestamptz `db:"reserved_until" json:"reserved_until"`
+	SoldOrderID        pgtype.Int8        `db:"sold_order_id" json:"sold_order_id"`
+	DisabledReason     pgtype.Text        `db:"disabled_reason" json:"disabled_reason"`
+	CreatedAt          pgtype.Timestamptz `db:"created_at" json:"created_at"`
+	UpdatedAt          pgtype.Timestamptz `db:"updated_at" json:"updated_at"`
+}
+
+type Order struct {
+	ID                int64              `db:"id" json:"id"`
+	UserID            int64              `db:"user_id" json:"user_id"`
+	Status            string             `db:"status" json:"status"`
+	Currency          string             `db:"currency" json:"currency"`
+	SubtotalVnd       int64              `db:"subtotal_vnd" json:"subtotal_vnd"`
+	TotalVnd          int64              `db:"total_vnd" json:"total_vnd"`
+	PaymentReference  string             `db:"payment_reference" json:"payment_reference"`
+	IdempotencyKey    string             `db:"idempotency_key" json:"idempotency_key"`
+	ExpiresAt         pgtype.Timestamptz `db:"expires_at" json:"expires_at"`
+	PaidAt            pgtype.Timestamptz `db:"paid_at" json:"paid_at"`
+	DeliveryStartedAt pgtype.Timestamptz `db:"delivery_started_at" json:"delivery_started_at"`
+	DeliveredAt       pgtype.Timestamptz `db:"delivered_at" json:"delivered_at"`
+	CancelledAt       pgtype.Timestamptz `db:"cancelled_at" json:"cancelled_at"`
+	Version           int64              `db:"version" json:"version"`
+	CreatedAt         pgtype.Timestamptz `db:"created_at" json:"created_at"`
+	UpdatedAt         pgtype.Timestamptz `db:"updated_at" json:"updated_at"`
+}
+
+type OrderInventoryItem struct {
+	OrderID         int64              `db:"order_id" json:"order_id"`
+	OrderItemID     int64              `db:"order_item_id" json:"order_item_id"`
+	InventoryItemID int64              `db:"inventory_item_id" json:"inventory_item_id"`
+	CreatedAt       pgtype.Timestamptz `db:"created_at" json:"created_at"`
+}
+
+type OrderItem struct {
+	ID           int64              `db:"id" json:"id"`
+	OrderID      int64              `db:"order_id" json:"order_id"`
+	ProductID    int64              `db:"product_id" json:"product_id"`
+	ProductName  string             `db:"product_name" json:"product_name"`
+	UnitPriceVnd int64              `db:"unit_price_vnd" json:"unit_price_vnd"`
+	Quantity     int32              `db:"quantity" json:"quantity"`
+	LineTotalVnd int64              `db:"line_total_vnd" json:"line_total_vnd"`
+	CreatedAt    pgtype.Timestamptz `db:"created_at" json:"created_at"`
+}
+
+type OrderStatusHistory struct {
+	ID         int64              `db:"id" json:"id"`
+	OrderID    int64              `db:"order_id" json:"order_id"`
+	FromStatus pgtype.Text        `db:"from_status" json:"from_status"`
+	ToStatus   string             `db:"to_status" json:"to_status"`
+	ReasonCode pgtype.Text        `db:"reason_code" json:"reason_code"`
+	ActorType  string             `db:"actor_type" json:"actor_type"`
+	ActorID    pgtype.Int8        `db:"actor_id" json:"actor_id"`
+	RequestID  pgtype.Text        `db:"request_id" json:"request_id"`
+	CreatedAt  pgtype.Timestamptz `db:"created_at" json:"created_at"`
+}
+
+type OutboxEvent struct {
+	ID               int64              `db:"id" json:"id"`
+	EventType        string             `db:"event_type" json:"event_type"`
+	AggregateType    string             `db:"aggregate_type" json:"aggregate_type"`
+	AggregateID      int64              `db:"aggregate_id" json:"aggregate_id"`
+	DeduplicationKey string             `db:"deduplication_key" json:"deduplication_key"`
+	Payload          []byte             `db:"payload" json:"payload"`
+	Status           string             `db:"status" json:"status"`
+	Attempts         int32              `db:"attempts" json:"attempts"`
+	MaxAttempts      int32              `db:"max_attempts" json:"max_attempts"`
+	NextAttemptAt    pgtype.Timestamptz `db:"next_attempt_at" json:"next_attempt_at"`
+	LockedAt         pgtype.Timestamptz `db:"locked_at" json:"locked_at"`
+	LockedBy         pgtype.Text        `db:"locked_by" json:"locked_by"`
+	LastErrorCode    pgtype.Text        `db:"last_error_code" json:"last_error_code"`
+	LastErrorDetail  pgtype.Text        `db:"last_error_detail" json:"last_error_detail"`
+	CompletedAt      pgtype.Timestamptz `db:"completed_at" json:"completed_at"`
+	CreatedAt        pgtype.Timestamptz `db:"created_at" json:"created_at"`
+	UpdatedAt        pgtype.Timestamptz `db:"updated_at" json:"updated_at"`
+}
+
+type Payment struct {
+	ID                    int64              `db:"id" json:"id"`
+	OrderID               pgtype.Int8        `db:"order_id" json:"order_id"`
+	UserID                int64              `db:"user_id" json:"user_id"`
+	Purpose               string             `db:"purpose" json:"purpose"`
+	Provider              string             `db:"provider" json:"provider"`
+	ProviderTransactionID pgtype.Text        `db:"provider_transaction_id" json:"provider_transaction_id"`
+	PaymentReference      string             `db:"payment_reference" json:"payment_reference"`
+	AmountVnd             int64              `db:"amount_vnd" json:"amount_vnd"`
+	Currency              string             `db:"currency" json:"currency"`
+	Status                string             `db:"status" json:"status"`
+	ConfirmedAt           pgtype.Timestamptz `db:"confirmed_at" json:"confirmed_at"`
+	CreatedAt             pgtype.Timestamptz `db:"created_at" json:"created_at"`
+	UpdatedAt             pgtype.Timestamptz `db:"updated_at" json:"updated_at"`
+}
+
+type PaymentEvent struct {
+	ID                    int64              `db:"id" json:"id"`
+	Provider              string             `db:"provider" json:"provider"`
+	ExternalEventID       string             `db:"external_event_id" json:"external_event_id"`
+	ProviderTransactionID pgtype.Text        `db:"provider_transaction_id" json:"provider_transaction_id"`
+	EventType             string             `db:"event_type" json:"event_type"`
+	PayloadHash           []byte             `db:"payload_hash" json:"payload_hash"`
+	SanitizedPayload      []byte             `db:"sanitized_payload" json:"sanitized_payload"`
+	SignatureVerified     bool               `db:"signature_verified" json:"signature_verified"`
+	ProcessingStatus      string             `db:"processing_status" json:"processing_status"`
+	ProcessingError       pgtype.Text        `db:"processing_error" json:"processing_error"`
+	ReceivedAt            pgtype.Timestamptz `db:"received_at" json:"received_at"`
+	ProcessedAt           pgtype.Timestamptz `db:"processed_at" json:"processed_at"`
+	CreatedAt             pgtype.Timestamptz `db:"created_at" json:"created_at"`
+	UpdatedAt             pgtype.Timestamptz `db:"updated_at" json:"updated_at"`
+}
+
+type Product struct {
+	ID           int64              `db:"id" json:"id"`
+	CategoryID   int64              `db:"category_id" json:"category_id"`
+	Name         string             `db:"name" json:"name"`
+	Slug         string             `db:"slug" json:"slug"`
+	Description  pgtype.Text        `db:"description" json:"description"`
+	PriceVnd     int64              `db:"price_vnd" json:"price_vnd"`
+	DeliveryType string             `db:"delivery_type" json:"delivery_type"`
+	ContactUrl   pgtype.Text        `db:"contact_url" json:"contact_url"`
+	IsActive     bool               `db:"is_active" json:"is_active"`
+	Version      int64              `db:"version" json:"version"`
+	CreatedAt    pgtype.Timestamptz `db:"created_at" json:"created_at"`
+	UpdatedAt    pgtype.Timestamptz `db:"updated_at" json:"updated_at"`
+}
+
+type SheetSyncRun struct {
+	ID             int64              `db:"id" json:"id"`
+	SourceID       string             `db:"source_id" json:"source_id"`
+	SourceVersion  string             `db:"source_version" json:"source_version"`
+	IdempotencyKey string             `db:"idempotency_key" json:"idempotency_key"`
+	Status         string             `db:"status" json:"status"`
+	ImportedCount  int32              `db:"imported_count" json:"imported_count"`
+	SkippedCount   int32              `db:"skipped_count" json:"skipped_count"`
+	FailedCount    int32              `db:"failed_count" json:"failed_count"`
+	ErrorDetails   []byte             `db:"error_details" json:"error_details"`
+	StartedAt      pgtype.Timestamptz `db:"started_at" json:"started_at"`
+	FinishedAt     pgtype.Timestamptz `db:"finished_at" json:"finished_at"`
+	CreatedAt      pgtype.Timestamptz `db:"created_at" json:"created_at"`
+	UpdatedAt      pgtype.Timestamptz `db:"updated_at" json:"updated_at"`
+}
+
+type ShopSetting struct {
+	ID                   int16              `db:"id" json:"id"`
+	ShopName             string             `db:"shop_name" json:"shop_name"`
+	SupportContact       string             `db:"support_contact" json:"support_contact"`
+	DefaultBankAccountID pgtype.Int8        `db:"default_bank_account_id" json:"default_bank_account_id"`
+	OrderExpireMinutes   int32              `db:"order_expire_minutes" json:"order_expire_minutes"`
+	Version              int64              `db:"version" json:"version"`
+	CreatedAt            pgtype.Timestamptz `db:"created_at" json:"created_at"`
+	UpdatedAt            pgtype.Timestamptz `db:"updated_at" json:"updated_at"`
+}
+
+type User struct {
+	ID             int64              `db:"id" json:"id"`
+	TelegramUserID int64              `db:"telegram_user_id" json:"telegram_user_id"`
+	Username       pgtype.Text        `db:"username" json:"username"`
+	DisplayName    pgtype.Text        `db:"display_name" json:"display_name"`
+	Status         string             `db:"status" json:"status"`
+	BanReason      pgtype.Text        `db:"ban_reason" json:"ban_reason"`
+	LastSeenAt     pgtype.Timestamptz `db:"last_seen_at" json:"last_seen_at"`
+	CreatedAt      pgtype.Timestamptz `db:"created_at" json:"created_at"`
+	UpdatedAt      pgtype.Timestamptz `db:"updated_at" json:"updated_at"`
+}
+
+type WalletAccount struct {
+	ID         int64              `db:"id" json:"id"`
+	UserID     int64              `db:"user_id" json:"user_id"`
+	Status     string             `db:"status" json:"status"`
+	BalanceVnd int64              `db:"balance_vnd" json:"balance_vnd"`
+	Version    int64              `db:"version" json:"version"`
+	CreatedAt  pgtype.Timestamptz `db:"created_at" json:"created_at"`
+	UpdatedAt  pgtype.Timestamptz `db:"updated_at" json:"updated_at"`
+}
+
+type WalletLedgerEntry struct {
+	ID              int64              `db:"id" json:"id"`
+	AccountID       int64              `db:"account_id" json:"account_id"`
+	EntryType       string             `db:"entry_type" json:"entry_type"`
+	AmountVnd       int64              `db:"amount_vnd" json:"amount_vnd"`
+	BalanceAfterVnd int64              `db:"balance_after_vnd" json:"balance_after_vnd"`
+	ReferenceType   string             `db:"reference_type" json:"reference_type"`
+	ReferenceID     int64              `db:"reference_id" json:"reference_id"`
+	IdempotencyKey  string             `db:"idempotency_key" json:"idempotency_key"`
+	CreatedAt       pgtype.Timestamptz `db:"created_at" json:"created_at"`
+}

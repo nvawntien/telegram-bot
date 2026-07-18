@@ -9,7 +9,26 @@ import (
 )
 
 type Querier interface {
+	ClaimAvailableInventory(ctx context.Context, arg ClaimAvailableInventoryParams) ([]InventoryItem, error)
+	ClaimPendingOutboxEvents(ctx context.Context, arg ClaimPendingOutboxEventsParams) ([]OutboxEvent, error)
+	CountAvailableInventoryByProduct(ctx context.Context, productID int64) (int64, error)
+	CreatePendingOrder(ctx context.Context, arg CreatePendingOrderParams) (Order, error)
 	DatabaseHealth(ctx context.Context) (int64, error)
+	GetOrderByID(ctx context.Context, id int64) (Order, error)
+	GetOrderOwnedByUser(ctx context.Context, arg GetOrderOwnedByUserParams) (Order, error)
+	GetUserByTelegramID(ctx context.Context, telegramUserID int64) (User, error)
+	InsertOrderItem(ctx context.Context, arg InsertOrderItemParams) (OrderItem, error)
+	InsertOrderStatusHistory(ctx context.Context, arg InsertOrderStatusHistoryParams) (OrderStatusHistory, error)
+	InsertOutboxEvent(ctx context.Context, arg InsertOutboxEventParams) (OutboxEvent, error)
+	InsertPayment(ctx context.Context, arg InsertPaymentParams) (Payment, error)
+	InsertPaymentEvent(ctx context.Context, arg InsertPaymentEventParams) (PaymentEvent, error)
+	ListActiveCategories(ctx context.Context) ([]Category, error)
+	ListActiveProductsByCategory(ctx context.Context, categoryID int64) ([]Product, error)
+	LockOrderForUpdate(ctx context.Context, id int64) (Order, error)
+	MarkOutboxEventCompleted(ctx context.Context, arg MarkOutboxEventCompletedParams) (OutboxEvent, error)
+	ScheduleOutboxRetry(ctx context.Context, arg ScheduleOutboxRetryParams) (OutboxEvent, error)
+	UpdateOrderStatusGuarded(ctx context.Context, arg UpdateOrderStatusGuardedParams) (Order, error)
+	UpsertTelegramUser(ctx context.Context, arg UpsertTelegramUserParams) (User, error)
 }
 
 var _ Querier = (*Queries)(nil)
