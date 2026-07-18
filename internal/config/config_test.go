@@ -27,6 +27,9 @@ func TestLoadValidConfig(t *testing.T) {
 	if cfg.PrometheusEnabled {
 		t.Fatal("PrometheusEnabled = true, want false")
 	}
+	if cfg.TelegramWebhookBodyLimit != 1<<20 || cfg.AdminSessionTTL != 15*time.Minute {
+		t.Fatalf("Phase 3 defaults = body:%d session:%s", cfg.TelegramWebhookBodyLimit, cfg.AdminSessionTTL)
+	}
 }
 
 func TestLoadReportsAllInvalidValues(t *testing.T) {
@@ -91,6 +94,18 @@ func TestLoadAPIRequiresWebhookConfiguration(t *testing.T) {
 	_, err := LoadAPI()
 	if err == nil || !strings.Contains(err.Error(), "TELEGRAM_WEBHOOK_URL") {
 		t.Fatalf("LoadAPI() error = %v, want webhook URL validation error", err)
+	}
+}
+
+func TestLoadAPIValidatesTelegramRuntimeLimits(t *testing.T) {
+	setValidEnvironment(t)
+	t.Setenv("TELEGRAM_WEBHOOK_BODY_LIMIT_BYTES", "100")
+	t.Setenv("ADMIN_SESSION_TTL_MINUTES", "0")
+	t.Setenv("SUPPORT_CONTACT", "")
+
+	_, err := LoadAPI()
+	if err == nil || !strings.Contains(err.Error(), "TELEGRAM_WEBHOOK_BODY_LIMIT_BYTES") || !strings.Contains(err.Error(), "ADMIN_SESSION_TTL_MINUTES") {
+		t.Fatalf("LoadAPI() error = %v", err)
 	}
 }
 

@@ -47,5 +47,7 @@ jobs:
         run: |
           go run github.com/sqlc-dev/sqlc/cmd/sqlc@v1.30.0 generate
           git diff --exit-code -- internal/postgres/generated
+      - name: Validate Docker Compose configuration
+        run: docker compose config --quiet
       - name: PostgreSQL integration tests
         run: make test-integration

@@ -29,3 +29,20 @@ func TestHTTPMetricsCanUseIsolatedRegistries(t *testing.T) {
 		}
 	}
 }
+
+func TestTelegramMetricsCanUseIsolatedRegistries(t *testing.T) {
+	for _, registry := range []*prometheus.Registry{prometheus.NewRegistry(), prometheus.NewRegistry()} {
+		metrics := NewTelegramMetrics(registry)
+		metrics.ObserveWebhook("accepted")
+		metrics.ObserveUpdate("message", "success", time.Millisecond)
+		metrics.ObserveDuplicate()
+		metrics.ObserveTelegramAPI("sendMessage", "success", time.Millisecond)
+		metrics.ObserveCatalog("list_categories", "success")
+		metrics.ObserveAdminMutation("category.create", "success")
+		metrics.ObserveAdminSession("start", "success")
+		families, err := registry.Gather()
+		if err != nil || len(families) != 9 {
+			t.Fatalf("Telegram registry families = %d, %v", len(families), err)
+		}
+	}
+}
