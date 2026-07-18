@@ -11,6 +11,22 @@ permissions:
 jobs:
   test:
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:18
+        env:
+          POSTGRES_DB: shop
+          POSTGRES_USER: shop
+          POSTGRES_PASSWORD: shop
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U shop -d shop"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      INTEGRATION_DATABASE_URL: postgres://shop:shop@localhost:5432/shop?sslmode=disable
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v6
@@ -18,15 +34,18 @@ jobs:
           go-version: "1.26.x"
           cache: true
       - name: Unit tests
+        run: go test ./...
+      - name: Race tests
         run: go test -race ./...
       - name: Vet
         run: go vet ./...
       - name: Build commands
-        run: go build ./cmd/...
+        run: go build ./...
       - name: Lint
         run: go run github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.8.0 run
       - name: Verify generated SQL
         run: |
           go run github.com/sqlc-dev/sqlc/cmd/sqlc@v1.30.0 generate
           git diff --exit-code -- internal/postgres/generated
-
+      - name: PostgreSQL integration tests
+        run: make test-integration
