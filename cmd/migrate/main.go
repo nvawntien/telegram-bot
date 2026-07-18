@@ -30,7 +30,7 @@ func run(ctx context.Context, args []string) error {
 		command = args[0]
 	}
 	if len(args) > 1 {
-		return errors.New("usage: migrate [up|up-by-one|down|status|version]")
+		return errors.New("usage: migrate [up|up-by-one|down|down-to-zero|status|version]")
 	}
 
 	database, err := sql.Open("pgx", cfg.DatabaseURL)
@@ -57,6 +57,8 @@ func run(ctx context.Context, args []string) error {
 		err = goose.UpByOneContext(ctx, database, cfg.MigrationsDir)
 	case "down":
 		err = goose.DownContext(ctx, database, cfg.MigrationsDir)
+	case "down-to-zero":
+		err = goose.DownToContext(ctx, database, cfg.MigrationsDir, 0)
 	case "status":
 		err = goose.StatusContext(ctx, database, cfg.MigrationsDir)
 	case "version":
