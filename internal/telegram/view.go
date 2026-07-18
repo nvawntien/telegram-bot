@@ -23,7 +23,7 @@ func MainMenuText(name string) string {
 func MainMenuKeyboard() Keyboard {
 	return Keyboard{
 		{{Text: "📦 Sản phẩm", Data: "v1:c:0"}},
-		{{Text: "🆘 Hỗ trợ", Data: "v1:m"}},
+		{{Text: "🆘 Hỗ trợ", Data: "v1:s"}},
 	}
 }
 

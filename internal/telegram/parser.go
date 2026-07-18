@@ -42,6 +42,7 @@ type CallbackAction string
 
 const (
 	CallbackMenu                   CallbackAction = "menu"
+	CallbackSupport                CallbackAction = "support"
 	CallbackCategories             CallbackAction = "categories"
 	CallbackProducts               CallbackAction = "products"
 	CallbackProductDetail          CallbackAction = "product_detail"
@@ -80,6 +81,8 @@ func ParseCallback(data string) (Callback, error) {
 	switch parts[1] {
 	case "m":
 		return exact(parts, 2, Callback{Action: CallbackMenu})
+	case "s":
+		return exact(parts, 2, Callback{Action: CallbackSupport})
 	case "c":
 		page, err := parseNonNegative(parts, 2, 3)
 		return Callback{Action: CallbackCategories, Page: int(page)}, err

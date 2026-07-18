@@ -213,6 +213,9 @@ func (r *Router) routeCallback(ctx context.Context, telegramID int64, callback C
 	switch callback.Action {
 	case CallbackMenu:
 		plan.text, plan.keyboard = MainMenuText("bạn"), MainMenuKeyboard()
+	case CallbackSupport:
+		plan.text = "Hỗ trợ: <b>" + Escape(r.supportContact) + "</b>"
+		plan.keyboard = Keyboard{{{Text: "⬅️ Menu", Data: "v1:m"}}}
 	case CallbackCategories:
 		page, err := r.catalog.ListCategories(ctx, callback.Page)
 		r.observeCatalog("list_categories", err)
