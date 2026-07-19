@@ -79,3 +79,23 @@ func TestPaymentInstructionViewEscapesValuesAndStatesBoundary(t *testing.T) {
 		t.Fatalf("PaymentInstructionView() keyboard = %#v", keyboard)
 	}
 }
+
+func TestWalletViewsKeepFinancialWarningsAndCallbackLimits(t *testing.T) {
+	account := app.WalletAccount{Balance: 125000}
+	text, keyboard := WalletBalanceView(account)
+	if !strings.Contains(text, "125.000") || len(keyboard) == 0 {
+		t.Fatalf("WalletBalanceView() = %q %#v", text, keyboard)
+	}
+	topup := app.WalletTopup{Amount: 50000, PaymentReference: "TS-TOPUP", ExpiresAt: time.Now().Add(time.Hour)}
+	text, keyboard = WalletTopupInstructionView(topup, app.PaymentInstruction{BankDisplayName: "Bank", AccountNumber: "1234", AccountName: "A", ImageURL: "https://example.test/qr"})
+	if !strings.Contains(text, "chỉ được cộng") {
+		t.Fatalf("top-up warning missing: %q", text)
+	}
+	for _, row := range keyboard {
+		for _, button := range row {
+			if len(button.Data) > MaxCallbackDataBytes {
+				t.Fatalf("callback exceeds Telegram limit: %q", button.Data)
+			}
+		}
+	}
+}

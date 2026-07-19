@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -16,124 +17,135 @@ import (
 func (s *AppStore) AcceptPayment(ctx context.Context, command app.AcceptPaymentCommand, acceptedAt time.Time, reservationTTL time.Duration) (app.PaymentAcceptanceResult, error) {
 	var result app.PaymentAcceptanceResult
 	err := s.transactor.WithinTransaction(ctx, func(ctx context.Context, queries *generated.Queries) error {
-		if command.PaymentEventID > 0 {
-			event, err := queries.LockPaymentEvent(ctx, command.PaymentEventID)
-			if err != nil {
-				return err
-			}
-			if event.ProcessingStatus == "completed" || event.ProcessingStatus == "review" {
-				result.Decision = "duplicate"
-				return nil
-			}
-			if event.ProcessingStatus != "processing" {
-				return app.ErrConflict
-			}
-		}
-
-		existing, err := queries.GetPaymentByProviderTransaction(ctx, generated.GetPaymentByProviderTransactionParams{
-			Provider: command.Provider, ProviderTransactionID: optionalText(command.ProviderTransactionID),
-		})
-		if err == nil {
-			return handleExistingPayment(ctx, queries, command, existing, acceptedAt, &result)
-		}
-		if !errors.Is(err, pgx.ErrNoRows) {
-			return err
-		}
-
-		order, err := queries.LockOrderByPaymentReference(ctx, command.Reference)
-		if errors.Is(err, pgx.ErrNoRows) {
-			return recordPaymentReview(ctx, queries, command, nil, 0, "unknown_reference", acceptedAt, &result)
-		}
-		if err != nil {
-			return err
-		}
-		result.Target = "order"
-		result.OrderID = order.ID
-
-		reviewReason := orderReviewReason(order, command, acceptedAt)
-		if reviewReason != "" {
-			payment, err := insertOrderPayment(ctx, queries, command, order, "review", acceptedAt)
-			if err != nil {
-				return err
-			}
-			return recordPaymentReview(ctx, queries, command, &payment, order.ID, reviewReason, acceptedAt, &result)
-		}
-
-		payment, err := insertOrderPayment(ctx, queries, command, order, "confirmed", acceptedAt)
-		if errors.Is(err, pgx.ErrNoRows) {
-			existing, findErr := queries.GetPaymentByProviderTransaction(ctx, generated.GetPaymentByProviderTransactionParams{
-				Provider: command.Provider, ProviderTransactionID: optionalText(command.ProviderTransactionID),
-			})
-			if findErr != nil {
-				return findErr
-			}
-			return handleExistingPayment(ctx, queries, command, existing, acceptedAt, &result)
-		}
-		if err != nil {
-			return err
-		}
-		result.PaymentID = payment.ID
-
-		paidOrder, err := queries.MarkOrderPaidGuarded(ctx, generated.MarkOrderPaidGuardedParams{
-			PaidAt: requiredTimestamp(acceptedAt), ID: order.ID, ExpectedVersion: order.Version,
-		})
-		if err != nil {
-			return err
-		}
-		if err := insertPaymentOrderHistory(ctx, queries, command, order.ID, domain.OrderStatusPendingPayment, domain.OrderStatusPaid, "payment_accepted"); err != nil {
-			return err
-		}
-		reservingOrder, err := queries.UpdateOrderStatusGuarded(ctx, generated.UpdateOrderStatusGuardedParams{
-			NewStatus: string(domain.OrderStatusReserving), ID: order.ID,
-			ExpectedStatus: string(domain.OrderStatusPaid), ExpectedVersion: paidOrder.Version,
-		})
-		if err != nil {
-			return err
-		}
-		if err := insertPaymentOrderHistory(ctx, queries, command, order.ID, domain.OrderStatusPaid, domain.OrderStatusReserving, "inventory_claim_started"); err != nil {
-			return err
-		}
-		inventoryIDs, err := queries.ClaimExactAvailableInventory(ctx, generated.ClaimExactAvailableInventoryParams{
-			OrderID: requiredInt8(order.ID), ReservedUntil: requiredTimestamp(acceptedAt.Add(reservationTTL)),
-			ProductID: order.ProductID, Quantity: order.Quantity,
-		})
-		if err != nil {
-			return err
-		}
-		if len(inventoryIDs) != int(order.Quantity) {
-			outOfStock, err := queries.UpdateOrderStatusGuarded(ctx, generated.UpdateOrderStatusGuardedParams{
-				NewStatus: string(domain.OrderStatusOutOfStock), ID: order.ID,
-				ExpectedStatus: string(domain.OrderStatusReserving), ExpectedVersion: reservingOrder.Version,
-			})
-			if err != nil {
-				return err
-			}
-			_ = outOfStock
-			if err := insertPaymentOrderHistory(ctx, queries, command, order.ID, domain.OrderStatusReserving, domain.OrderStatusOutOfStock, "post_payment_inventory_insufficient"); err != nil {
-				return err
-			}
-			return recordPaymentReview(ctx, queries, command, &payment, order.ID, "out_of_stock", acceptedAt, &result)
-		}
-		for _, inventoryID := range inventoryIDs {
-			if err := queries.InsertOrderInventoryMapping(ctx, generated.InsertOrderInventoryMappingParams{OrderID: order.ID, OrderItemID: order.OrderItemID, InventoryItemID: inventoryID}); err != nil {
-				return err
-			}
-		}
-		allocation, err := queries.InsertPaymentAllocation(ctx, generated.InsertPaymentAllocationParams{
-			PaymentID: payment.ID, TargetType: "order", TargetID: order.ID, AmountVnd: command.Amount.Int64(),
-		})
-		if err != nil {
-			return err
-		}
-		_ = allocation
-		result.Decision = "accepted"
-		result.Claimed = len(inventoryIDs)
-		if err := completePaymentEvent(ctx, queries, command.PaymentEventID, "completed", order.ID, 0, acceptedAt, "", ""); err != nil {
-			return err
-		}
-		return insertPaymentAudit(ctx, queries, command, payment.ID, order.ID, result.Decision, "")
+		return acceptPaymentWithinTransaction(ctx, queries, command, acceptedAt, reservationTTL, &result)
 	})
 	return result, err
+}
+
+func acceptPaymentWithinTransaction(ctx context.Context, queries *generated.Queries, command app.AcceptPaymentCommand, acceptedAt time.Time, reservationTTL time.Duration, result *app.PaymentAcceptanceResult) error {
+	if command.PaymentEventID > 0 {
+		event, err := queries.LockPaymentEvent(ctx, command.PaymentEventID)
+		if err != nil {
+			return err
+		}
+		if event.ProcessingStatus == "completed" || event.ProcessingStatus == "review" {
+			result.Decision = "duplicate"
+			return nil
+		}
+		if event.ProcessingStatus != "processing" {
+			return app.ErrConflict
+		}
+	}
+
+	existing, err := queries.GetPaymentByProviderTransaction(ctx, generated.GetPaymentByProviderTransactionParams{
+		Provider: command.Provider, ProviderTransactionID: optionalText(command.ProviderTransactionID),
+	})
+	if err == nil {
+		return handleExistingPayment(ctx, queries, command, existing, acceptedAt, result)
+	}
+	if !errors.Is(err, pgx.ErrNoRows) {
+		return err
+	}
+
+	order, err := queries.LockOrderByPaymentReference(ctx, command.Reference)
+	if errors.Is(err, pgx.ErrNoRows) {
+		topup, topupErr := queries.LockWalletTopupByReference(ctx, command.Reference)
+		if errors.Is(topupErr, pgx.ErrNoRows) {
+			return recordPaymentReview(ctx, queries, command, nil, 0, "unknown_reference", acceptedAt, result)
+		}
+		if topupErr != nil {
+			return topupErr
+		}
+		return acceptWalletTopupPayment(ctx, queries, command, topup, acceptedAt, result)
+	}
+	if err != nil {
+		return err
+	}
+	result.Target = "order"
+	result.OrderID = order.ID
+
+	reviewReason := orderReviewReason(order, command, acceptedAt)
+	if reviewReason != "" {
+		payment, err := insertOrderPayment(ctx, queries, command, order, "review", acceptedAt)
+		if err != nil {
+			return err
+		}
+		return recordPaymentReview(ctx, queries, command, &payment, order.ID, reviewReason, acceptedAt, result)
+	}
+
+	payment, err := insertOrderPayment(ctx, queries, command, order, "confirmed", acceptedAt)
+	if errors.Is(err, pgx.ErrNoRows) {
+		existing, findErr := queries.GetPaymentByProviderTransaction(ctx, generated.GetPaymentByProviderTransactionParams{
+			Provider: command.Provider, ProviderTransactionID: optionalText(command.ProviderTransactionID),
+		})
+		if findErr != nil {
+			return findErr
+		}
+		return handleExistingPayment(ctx, queries, command, existing, acceptedAt, result)
+	}
+	if err != nil {
+		return err
+	}
+	result.PaymentID = payment.ID
+
+	paidOrder, err := queries.MarkOrderPaidGuarded(ctx, generated.MarkOrderPaidGuardedParams{
+		PaidAt: requiredTimestamp(acceptedAt), ID: order.ID, ExpectedVersion: order.Version,
+	})
+	if err != nil {
+		return err
+	}
+	if err := insertPaymentOrderHistory(ctx, queries, command, order.ID, domain.OrderStatusPendingPayment, domain.OrderStatusPaid, "payment_accepted"); err != nil {
+		return err
+	}
+	reservingOrder, err := queries.UpdateOrderStatusGuarded(ctx, generated.UpdateOrderStatusGuardedParams{
+		NewStatus: string(domain.OrderStatusReserving), ID: order.ID,
+		ExpectedStatus: string(domain.OrderStatusPaid), ExpectedVersion: paidOrder.Version,
+	})
+	if err != nil {
+		return err
+	}
+	if err := insertPaymentOrderHistory(ctx, queries, command, order.ID, domain.OrderStatusPaid, domain.OrderStatusReserving, "inventory_claim_started"); err != nil {
+		return err
+	}
+	inventoryIDs, err := queries.ClaimExactAvailableInventory(ctx, generated.ClaimExactAvailableInventoryParams{
+		OrderID: requiredInt8(order.ID), ReservedUntil: requiredTimestamp(acceptedAt.Add(reservationTTL)),
+		ProductID: order.ProductID, Quantity: order.Quantity,
+	})
+	if err != nil {
+		return err
+	}
+	if len(inventoryIDs) != int(order.Quantity) {
+		outOfStock, err := queries.UpdateOrderStatusGuarded(ctx, generated.UpdateOrderStatusGuardedParams{
+			NewStatus: string(domain.OrderStatusOutOfStock), ID: order.ID,
+			ExpectedStatus: string(domain.OrderStatusReserving), ExpectedVersion: reservingOrder.Version,
+		})
+		if err != nil {
+			return err
+		}
+		_ = outOfStock
+		if err := insertPaymentOrderHistory(ctx, queries, command, order.ID, domain.OrderStatusReserving, domain.OrderStatusOutOfStock, "post_payment_inventory_insufficient"); err != nil {
+			return err
+		}
+		return recordPaymentReview(ctx, queries, command, &payment, order.ID, "out_of_stock", acceptedAt, result)
+	}
+	for _, inventoryID := range inventoryIDs {
+		if err := queries.InsertOrderInventoryMapping(ctx, generated.InsertOrderInventoryMappingParams{OrderID: order.ID, OrderItemID: order.OrderItemID, InventoryItemID: inventoryID}); err != nil {
+			return err
+		}
+	}
+	allocation, err := queries.InsertPaymentAllocation(ctx, generated.InsertPaymentAllocationParams{
+		PaymentID: payment.ID, TargetType: "order", TargetID: order.ID, AmountVnd: command.Amount.Int64(),
+	})
+	if err != nil {
+		return err
+	}
+	_ = allocation
+	result.Decision = "accepted"
+	result.Claimed = len(inventoryIDs)
+	if err := completePaymentEvent(ctx, queries, command.PaymentEventID, "completed", order.ID, 0, acceptedAt, "", ""); err != nil {
+		return err
+	}
+	return insertPaymentAudit(ctx, queries, command, payment.ID, order.ID, result.Decision, "")
 }
 
 func orderReviewReason(order generated.LockOrderByPaymentReferenceRow, command app.AcceptPaymentCommand, acceptedAt time.Time) string {
@@ -178,6 +190,8 @@ func handleExistingPayment(ctx context.Context, queries *generated.Queries, comm
 		result.Target = allocation.TargetType
 		if allocation.TargetType == "order" {
 			result.OrderID = allocation.TargetID
+		} else if allocation.TargetType == "wallet_topup" {
+			result.TopupID = allocation.TargetID
 		}
 		return completePaymentEvent(ctx, queries, command.PaymentEventID, "completed", result.OrderID, result.TopupID, acceptedAt, "", "")
 	}
@@ -185,6 +199,94 @@ func handleExistingPayment(ctx context.Context, queries *generated.Queries, comm
 		return err
 	}
 	return recordPaymentReview(ctx, queries, command, &existing, existing.OrderID.Int64, "duplicate_unallocated", acceptedAt, result)
+}
+
+func acceptWalletTopupPayment(ctx context.Context, queries *generated.Queries, command app.AcceptPaymentCommand, topup generated.WalletTopupIntent, acceptedAt time.Time, result *app.PaymentAcceptanceResult) error {
+	result.Target = "wallet_topup"
+	result.TopupID = topup.ID
+	reason := ""
+	if topup.AmountVnd != command.Amount.Int64() {
+		reason = "amount_mismatch"
+	} else if topup.Currency != command.Currency {
+		reason = "currency_mismatch"
+	} else if topup.Status != "pending_payment" || !topup.ExpiresAt.Time.After(acceptedAt) {
+		reason = "topup_expired"
+	}
+	status := "confirmed"
+	if reason != "" {
+		status = "review"
+	}
+	confirmedAt := pgtype.Timestamptz{}
+	if status == "confirmed" {
+		confirmedAt = requiredTimestamp(acceptedAt)
+	}
+	payment, err := queries.InsertPayment(ctx, generated.InsertPaymentParams{
+		UserID: topup.UserID, Purpose: "wallet_topup", Provider: command.Provider,
+		ProviderTransactionID: optionalText(command.ProviderTransactionID), PaymentReference: command.Reference,
+		AmountVnd: command.Amount.Int64(), Status: status, ConfirmedAt: confirmedAt,
+		OccurredAt: requiredTimestamp(command.OccurredAt),
+	})
+	if errors.Is(err, pgx.ErrNoRows) {
+		existing, findErr := queries.GetPaymentByProviderTransaction(ctx, generated.GetPaymentByProviderTransactionParams{Provider: command.Provider, ProviderTransactionID: optionalText(command.ProviderTransactionID)})
+		if findErr != nil {
+			return findErr
+		}
+		return handleExistingPayment(ctx, queries, command, existing, acceptedAt, result)
+	}
+	if err != nil {
+		return err
+	}
+	result.PaymentID = payment.ID
+	if reason != "" {
+		if topup.Status == "pending_payment" || topup.Status == "expired" {
+			if _, err := queries.MarkWalletTopupReview(ctx, topup.ID); err != nil {
+				return err
+			}
+		}
+		return recordTopupReview(ctx, queries, command, payment.ID, topup.ID, reason, acceptedAt, result)
+	}
+	wallet, err := queries.LockWalletAccount(ctx, topup.WalletAccountID)
+	if err != nil {
+		return err
+	}
+	updatedWallet, err := queries.UpdateWalletBalance(ctx, generated.UpdateWalletBalanceParams{AmountVnd: command.Amount.Int64(), ID: wallet.ID})
+	if err != nil {
+		return err
+	}
+	if _, err := queries.InsertWalletLedgerEntry(ctx, generated.InsertWalletLedgerEntryParams{
+		AccountID: wallet.ID, EntryType: "credit", AmountVnd: command.Amount.Int64(), BalanceAfterVnd: updatedWallet.BalanceVnd,
+		ReferenceType: "wallet_topup", ReferenceID: topup.ID, IdempotencyKey: fmt.Sprintf("payment:%d", payment.ID),
+	}); err != nil {
+		return err
+	}
+	if _, err := queries.MarkWalletTopupCredited(ctx, generated.MarkWalletTopupCreditedParams{CreditedAt: requiredTimestamp(acceptedAt), ID: topup.ID, ExpectedVersion: topup.Version}); err != nil {
+		return err
+	}
+	if _, err := queries.InsertPaymentAllocation(ctx, generated.InsertPaymentAllocationParams{PaymentID: payment.ID, TargetType: "wallet_topup", TargetID: topup.ID, AmountVnd: command.Amount.Int64()}); err != nil {
+		return err
+	}
+	result.Decision = "accepted"
+	if err := completePaymentEvent(ctx, queries, command.PaymentEventID, "completed", 0, topup.ID, acceptedAt, "", ""); err != nil {
+		return err
+	}
+	return insertPaymentAudit(ctx, queries, command, payment.ID, 0, "accepted", "wallet_topup")
+}
+
+func recordTopupReview(ctx context.Context, queries *generated.Queries, command app.AcceptPaymentCommand, paymentID, topupID int64, reason string, acceptedAt time.Time, result *app.PaymentAcceptanceResult) error {
+	_, err := queries.InsertPaymentReviewCase(ctx, generated.InsertPaymentReviewCaseParams{
+		PaymentEventID: optionalInt8(command.PaymentEventID), PaymentID: optionalInt8(paymentID), WalletTopupID: optionalInt8(topupID),
+		Provider: command.Provider, ProviderTransactionID: optionalText(command.ProviderTransactionID), PaymentReference: command.Reference,
+		AmountVnd: command.Amount.Int64(), Currency: command.Currency, OccurredAt: requiredTimestamp(command.OccurredAt), Reason: reason,
+	})
+	if err != nil {
+		return err
+	}
+	result.Decision = "review"
+	result.Reason = reason
+	if err := completePaymentEvent(ctx, queries, command.PaymentEventID, "review", 0, topupID, acceptedAt, reason, reason); err != nil {
+		return err
+	}
+	return insertPaymentAudit(ctx, queries, command, paymentID, 0, "review", reason)
 }
 
 func recordPaymentReview(ctx context.Context, queries *generated.Queries, command app.AcceptPaymentCommand, payment *generated.Payment, orderID int64, reason string, acceptedAt time.Time, result *app.PaymentAcceptanceResult) error {

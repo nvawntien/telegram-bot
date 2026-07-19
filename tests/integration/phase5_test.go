@@ -493,7 +493,7 @@ func TestPhase5TelegramFailureHappensAfterOrderCommit(t *testing.T) {
 	messenger := &capturingFailingMessenger{err: errors.New("transport unavailable")}
 	var logs bytes.Buffer
 	router := telegramadapter.NewRouterWithOrdering(
-		users, catalog, fixture.admins, inventory, fixture.banks, fixture.orders, fixture.updates,
+		users, catalog, fixture.admins, inventory, fixture.banks, fixture.orders, nil, nil, fixture.updates,
 		messenger, "Support", slog.New(slog.NewTextHandler(&logs, nil)), nil,
 	)
 	updateID := nextPhase5Update(fixture.database)
@@ -536,7 +536,7 @@ func TestPhase5TelegramProductToBankOrderHistoryAndCancellationFlow(t *testing.T
 	inventory := app.NewInventoryAdminService(fixture.store, fixture.admins, inventoryCipher, app.InventoryImportLimits{MaxItems: 10, MaxItemBytes: 100, MaxTotalBytes: 1000}, 8, nil)
 	messenger := &phase5RecordingMessenger{}
 	router := telegramadapter.NewRouterWithOrdering(
-		users, catalog, fixture.admins, inventory, fixture.banks, fixture.orders, fixture.updates,
+		users, catalog, fixture.admins, inventory, fixture.banks, fixture.orders, nil, nil, fixture.updates,
 		messenger, "Support", slog.New(slog.NewTextHandler(bytes.NewBuffer(nil), nil)), nil,
 	)
 	telegramUser := models.User{ID: user.TelegramUserID, FirstName: "Buyer"}

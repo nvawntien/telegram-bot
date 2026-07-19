@@ -109,6 +109,7 @@ type Querier interface {
 	LockProductByID(ctx context.Context, id int64) (Product, error)
 	LockRedactedInventoryItem(ctx context.Context, id int64) (LockRedactedInventoryItemRow, error)
 	LockTelegramUpdateReceipt(ctx context.Context, updateID int64) (TelegramUpdateReceipt, error)
+	LockUserByTelegramID(ctx context.Context, telegramUserID int64) (User, error)
 	LockUserForOrderCreation(ctx context.Context, telegramUserID int64) (User, error)
 	LockWalletAccount(ctx context.Context, id int64) (WalletAccount, error)
 	LockWalletTopupByReference(ctx context.Context, paymentReference string) (WalletTopupIntent, error)

@@ -25,6 +25,7 @@ func MainMenuKeyboard() Keyboard {
 	return Keyboard{
 		{{Text: "📦 Sản phẩm", Data: "v1:c:0"}},
 		{{Text: "🧾 Đơn hàng", Data: "v1:o:l:0"}},
+		{{Text: "💰 Số dư", Data: "v1:w:v"}},
 		{{Text: "🆘 Hỗ trợ", Data: "v1:s"}},
 	}
 }
@@ -126,10 +127,37 @@ func OrderDetailView(order app.OrderDetail, instruction app.PaymentInstruction) 
 	rows := Keyboard{}
 	if order.Status == domain.OrderStatusPendingPayment && instruction.ImageURL != "" {
 		rows = append(rows, []Button{{Text: "Mở VietQR", URL: instruction.ImageURL}})
+		rows = append(rows, []Button{{Text: "Thanh toán bằng ví", Data: fmt.Sprintf("v1:o:w:%d", order.ID)}})
 		rows = append(rows, []Button{{Text: "Hủy đơn", Data: fmt.Sprintf("v1:o:x:%d:%d", order.ID, order.Version)}})
 	}
 	rows = append(rows, []Button{{Text: "⬅️ Danh sách", Data: "v1:o:l:0"}})
 	return text, rows
+}
+
+func WalletBalanceView(account app.WalletAccount) (string, Keyboard) {
+	return fmt.Sprintf("<b>Số dư ví</b>\n%s ₫", formatVND(account.Balance.Int64())), Keyboard{
+		{{Text: "Nạp 50.000 ₫", Data: "v1:w:a:50000"}, {Text: "Nạp 100.000 ₫", Data: "v1:w:a:100000"}},
+		{{Text: "Nạp 500.000 ₫", Data: "v1:w:a:500000"}},
+		{{Text: "⬅️ Menu", Data: "v1:m"}},
+	}
+}
+
+func WalletTopupBankView(flowID, amount int64, banks []app.BankAccountOption) (string, Keyboard) {
+	rows := make(Keyboard, 0, len(banks)+1)
+	for _, bank := range banks {
+		rows = append(rows, []Button{{Text: bank.DisplayName + " · ••••" + bank.Last4, Data: fmt.Sprintf("v1:w:b:%d:%d:%d", flowID, amount, bank.ID)}})
+	}
+	rows = append(rows, []Button{{Text: "⬅️ Ví", Data: "v1:w:a:50000"}})
+	return fmt.Sprintf("<b>Chọn tài khoản nhận</b>\nSố tiền nạp: %s ₫", formatVND(amount)), rows
+}
+
+func WalletTopupInstructionView(topup app.WalletTopup, instruction app.PaymentInstruction) (string, Keyboard) {
+	text := fmt.Sprintf("<b>Hướng dẫn nạp ví</b>\nNgân hàng: %s\nSố tài khoản: <code>%s</code>\nTên tài khoản: <b>%s</b>\nSố tiền: <b>%s ₫</b>\nNội dung: <code>%s</code>\nHết hạn: %s\n\nQR chỉ là hướng dẫn. Ví chỉ được cộng sau khi payment được chấp nhận.", Escape(instruction.BankDisplayName), Escape(instruction.AccountNumber), Escape(instruction.AccountName), formatVND(topup.Amount.Int64()), Escape(topup.PaymentReference), topup.ExpiresAt.Local().Format("02/01/2006 15:04:05"))
+	return text, Keyboard{{{Text: "Mở VietQR", URL: instruction.ImageURL}}, {{Text: "Xem số dư", Data: "v1:w:v"}}}
+}
+
+func WalletOrderConfirmationView(order app.OrderDetail, balance app.WalletAccount, flowID int64) (string, Keyboard) {
+	return fmt.Sprintf("Xác nhận dùng ví thanh toán đơn #%d?\nTổng: %s ₫\nSố dư: %s ₫", order.ID, formatVND(order.Total.Int64()), formatVND(balance.Balance.Int64())), Keyboard{{{Text: "Xác nhận", Data: fmt.Sprintf("v1:o:y:%d:%d", flowID, order.ID)}}, {{Text: "Quay lại", Data: fmt.Sprintf("v1:o:v:%d", order.ID)}}}
 }
 
 func OrderCancelConfirmationView(orderID, version int64) (string, Keyboard) {
@@ -142,7 +170,24 @@ func AdminMenu() (string, Keyboard) {
 		{{Text: "Sản phẩm", Data: "v1:a:p:0"}},
 		{{Text: "Kho mã hóa", Data: "v1:a:i:0"}},
 		{{Text: "Tài khoản ngân hàng", Data: "v1:a:b:0"}},
+		{{Text: "Payment reviews", Data: "v1:a:pr:0"}},
+		{{Text: "Manual confirm", Data: "v1:a:pm"}},
+		{{Text: "Điều chỉnh ví", Data: "v1:a:wa"}},
 	}
+}
+
+func PaymentReviewsView(page app.PaymentReviewPage) (string, Keyboard) {
+	lines := []string{"<b>Payment review queue</b>"}
+	rows := Keyboard{}
+	for _, item := range page.Items {
+		lines = append(lines, fmt.Sprintf("#%d · %s · %s ₫ · %s · ref <code>%s</code> · tx %s", item.ID, Escape(item.Reason), formatVND(item.Amount.Int64()), Escape(item.Currency), Escape(item.Reference), Escape(item.MaskedTransactionID)))
+		rows = append(rows, []Button{{Text: fmt.Sprintf("Resolve #%d", item.ID), Data: fmt.Sprintf("v1:a:rr:%d", item.ID)}})
+	}
+	if len(page.Items) == 0 {
+		lines = append(lines, "Không có case đang mở.")
+	}
+	rows = append(rows, navigationRows("v1:a:pr:%d", page.Page)...)
+	return strings.Join(lines, "\n"), rows
 }
 
 func AdminBankAccountsView(page app.RedactedBankAccountPage) (string, Keyboard) {

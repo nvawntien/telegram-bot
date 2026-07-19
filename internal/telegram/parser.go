@@ -53,6 +53,11 @@ const (
 	CallbackOrderView               CallbackAction = "order_view"
 	CallbackOrderAskCancel          CallbackAction = "order_ask_cancel"
 	CallbackOrderCancel             CallbackAction = "order_cancel"
+	CallbackOrderWalletAsk          CallbackAction = "order_wallet_ask"
+	CallbackOrderWalletPay          CallbackAction = "order_wallet_pay"
+	CallbackWalletTopupAmount       CallbackAction = "wallet_topup_amount"
+	CallbackWalletTopupBank         CallbackAction = "wallet_topup_bank"
+	CallbackWalletBalance           CallbackAction = "wallet_balance"
 	CallbackAdminCategories         CallbackAction = "admin_categories"
 	CallbackAdminProducts           CallbackAction = "admin_products"
 	CallbackAdminCategoryNew        CallbackAction = "admin_category_new"
@@ -73,6 +78,10 @@ const (
 	CallbackAdminBankEdit           CallbackAction = "admin_bank_edit"
 	CallbackAdminBankAskToggle      CallbackAction = "admin_bank_ask_toggle"
 	CallbackAdminBankToggle         CallbackAction = "admin_bank_toggle"
+	CallbackAdminPaymentReviews     CallbackAction = "admin_payment_reviews"
+	CallbackAdminPaymentManual      CallbackAction = "admin_payment_manual"
+	CallbackAdminPaymentResolve     CallbackAction = "admin_payment_resolve"
+	CallbackAdminWalletAdjustment   CallbackAction = "admin_wallet_adjustment"
 	CallbackAdminCancel             CallbackAction = "admin_cancel"
 )
 
@@ -90,6 +99,8 @@ type Callback struct {
 	SessionID      int64
 	SessionVersion int64
 	Active         bool
+	AmountVND      int64
+	ReviewID       int64
 }
 
 func ParseCallback(data string) (Callback, error) {
@@ -134,6 +145,8 @@ func ParseCallback(data string) (Callback, error) {
 		return Callback{Action: CallbackProductDetail, ProductID: productID, CategoryID: categoryID, Page: int(page)}, err
 	case "o":
 		return parseOrderCallback(parts)
+	case "w":
+		return parseWalletCallback(parts)
 	case "a":
 		return parseAdminCallback(parts)
 	default:
@@ -211,6 +224,54 @@ func parseOrderCallback(parts []string) (Callback, error) {
 			action = CallbackOrderCancel
 		}
 		return Callback{Action: action, OrderID: orderID, RecordVersion: version}, err
+	case "w":
+		if len(parts) != 4 {
+			return Callback{}, ErrInvalidCallback
+		}
+		orderID, err := positive(parts[3])
+		return Callback{Action: CallbackOrderWalletAsk, OrderID: orderID}, err
+	case "y":
+		if len(parts) != 5 {
+			return Callback{}, ErrInvalidCallback
+		}
+		flowID, err := positive(parts[3])
+		if err != nil {
+			return Callback{}, err
+		}
+		orderID, err := positive(parts[4])
+		return Callback{Action: CallbackOrderWalletPay, FlowID: flowID, OrderID: orderID}, err
+	default:
+		return Callback{}, ErrInvalidCallback
+	}
+}
+
+func parseWalletCallback(parts []string) (Callback, error) {
+	if len(parts) < 3 {
+		return Callback{}, ErrInvalidCallback
+	}
+	switch parts[2] {
+	case "v":
+		return exact(parts, 3, Callback{Action: CallbackWalletBalance})
+	case "a":
+		if len(parts) != 4 {
+			return Callback{}, ErrInvalidCallback
+		}
+		amount, err := positive(parts[3])
+		return Callback{Action: CallbackWalletTopupAmount, AmountVND: amount}, err
+	case "b":
+		if len(parts) != 6 {
+			return Callback{}, ErrInvalidCallback
+		}
+		flowID, err := positive(parts[3])
+		if err != nil {
+			return Callback{}, err
+		}
+		amount, err := positive(parts[4])
+		if err != nil {
+			return Callback{}, err
+		}
+		bankID, err := positive(parts[5])
+		return Callback{Action: CallbackWalletTopupBank, FlowID: flowID, AmountVND: amount, BankAccountID: bankID}, err
 	default:
 		return Callback{}, ErrInvalidCallback
 	}
@@ -221,6 +282,19 @@ func parseAdminCallback(parts []string) (Callback, error) {
 		return Callback{}, ErrInvalidCallback
 	}
 	switch parts[2] {
+	case "pm":
+		return exact(parts, 3, Callback{Action: CallbackAdminPaymentManual})
+	case "pr":
+		page, err := parseNonNegative(parts, 3, 4)
+		return Callback{Action: CallbackAdminPaymentReviews, Page: int(page)}, err
+	case "rr":
+		if len(parts) != 4 {
+			return Callback{}, ErrInvalidCallback
+		}
+		reviewID, err := positive(parts[3])
+		return Callback{Action: CallbackAdminPaymentResolve, ReviewID: reviewID}, err
+	case "wa":
+		return exact(parts, 3, Callback{Action: CallbackAdminWalletAdjustment})
 	case "b":
 		page, err := parseNonNegative(parts, 3, 4)
 		return Callback{Action: CallbackAdminBanks, Page: int(page)}, err

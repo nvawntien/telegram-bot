@@ -12,6 +12,7 @@ import (
 	"github.com/nvawntien/telegram-bot/internal/app"
 	"github.com/nvawntien/telegram-bot/internal/bankcrypto"
 	"github.com/nvawntien/telegram-bot/internal/config"
+	"github.com/nvawntien/telegram-bot/internal/domain"
 	"github.com/nvawntien/telegram-bot/internal/httpapi"
 	"github.com/nvawntien/telegram-bot/internal/inventorycrypto"
 	"github.com/nvawntien/telegram-bot/internal/observability"
@@ -55,6 +56,7 @@ func run(ctx context.Context) error {
 	metrics := observability.NewHTTPMetrics(prometheus.DefaultRegisterer)
 	telegramMetrics := observability.NewTelegramMetrics(prometheus.DefaultRegisterer)
 	paymentMetrics := observability.NewPaymentMetrics(prometheus.DefaultRegisterer)
+	walletMetrics := observability.NewWalletMetrics(prometheus.DefaultRegisterer)
 	store := postgres.NewAppStore(pool)
 	userService := app.NewUserService(store)
 	catalogService := app.NewCatalogService(store, app.DefaultPageSize)
@@ -93,6 +95,12 @@ func run(ctx context.Context) error {
 		store, bankCipher, vietQRGenerator, referenceGenerator, cfg.OrderExpiry,
 		cfg.OrderMaxQuantity, cfg.OrderPageSize,
 	)
+	walletService := app.NewWalletService(
+		store, bankCipher, vietQRGenerator, referenceGenerator,
+		domain.Money(cfg.WalletTopupMinAmount), domain.Money(cfg.WalletTopupMaxAmount),
+		cfg.WalletTopupExpiry, app.DefaultPostPaymentReservationTTL, walletMetrics,
+	)
+	paymentAdminService := app.NewPaymentAdminService(store, cfg.PaymentReviewPageSize, app.DefaultPostPaymentReservationTTL)
 	updateService := app.NewUpdateService(store, cfg.TelegramUpdateStaleAfter)
 	telegramClient, err := telegramadapter.NewClient(
 		cfg.TelegramBotToken, "", cfg.TelegramAPITimeout, 1<<20, telegramMetrics,
@@ -102,6 +110,8 @@ func run(ctx context.Context) error {
 	}
 	telegramRouter := telegramadapter.NewRouterWithOrdering(
 		userService, catalogService, adminService, inventoryService, bankService, orderService,
+		walletService,
+		paymentAdminService,
 		updateService, telegramClient,
 		cfg.SupportContact, logger, telegramMetrics,
 	)

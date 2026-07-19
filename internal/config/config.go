@@ -45,6 +45,11 @@ const (
 	defaultPaymentEventRetryBase          = 5 * time.Second
 	defaultPaymentStaleTimeout            = 2 * time.Minute
 	defaultSignedJSONTolerance            = 5 * time.Minute
+	defaultWalletTopupMin           int64 = 10_000
+	defaultWalletTopupMax           int64 = 10_000_000
+	defaultWalletTopupExpiry              = 15 * time.Minute
+	defaultWalletPageSize                 = 8
+	defaultPaymentReviewPageSize          = 8
 )
 
 // Config is immutable after startup and is passed explicitly to process dependencies.
@@ -90,6 +95,11 @@ type Config struct {
 	PaymentAllowedProviders       []string
 	SignedJSONWebhookSecret       string
 	SignedJSONTimestampTolerance  time.Duration
+	WalletTopupMinAmount          int64
+	WalletTopupMaxAmount          int64
+	WalletTopupExpiry             time.Duration
+	WalletPageSize                int
+	PaymentReviewPageSize         int
 	DeliveryMaxAttempts           int
 	DeliveryRetryBase             time.Duration
 	LogLevel                      slog.Level
@@ -163,6 +173,11 @@ func load(process processKind) (Config, error) {
 		PaymentEventRetryBase:         defaultPaymentEventRetryBase,
 		PaymentStaleProcessingTimeout: defaultPaymentStaleTimeout,
 		SignedJSONTimestampTolerance:  defaultSignedJSONTolerance,
+		WalletTopupMinAmount:          defaultWalletTopupMin,
+		WalletTopupMaxAmount:          defaultWalletTopupMax,
+		WalletTopupExpiry:             defaultWalletTopupExpiry,
+		WalletPageSize:                defaultWalletPageSize,
+		PaymentReviewPageSize:         defaultPaymentReviewPageSize,
 		DeliveryMaxAttempts:           5,
 		DeliveryRetryBase:             defaultRetryBase,
 		LogLevel:                      slog.LevelInfo,
@@ -195,6 +210,11 @@ func load(process processKind) (Config, error) {
 		assign(&problems, "PAYMENT_ALLOWED_PROVIDERS", parsePaymentProviders(os.Getenv("PAYMENT_ALLOWED_PROVIDERS")), &cfg.PaymentAllowedProviders)
 		cfg.SignedJSONWebhookSecret = strings.TrimSpace(os.Getenv("SIGNED_JSON_WEBHOOK_SECRET"))
 		assign(&problems, "SIGNED_JSON_TIMESTAMP_TOLERANCE", parsePositiveDuration(os.Getenv("SIGNED_JSON_TIMESTAMP_TOLERANCE"), time.Second, cfg.SignedJSONTimestampTolerance), &cfg.SignedJSONTimestampTolerance)
+		assign(&problems, "WALLET_TOPUP_MIN_AMOUNT", parsePositiveInt64(os.Getenv("WALLET_TOPUP_MIN_AMOUNT"), cfg.WalletTopupMinAmount), &cfg.WalletTopupMinAmount)
+		assign(&problems, "WALLET_TOPUP_MAX_AMOUNT", parsePositiveInt64(os.Getenv("WALLET_TOPUP_MAX_AMOUNT"), cfg.WalletTopupMaxAmount), &cfg.WalletTopupMaxAmount)
+		assign(&problems, "WALLET_TOPUP_EXPIRE_MINUTES", parsePositiveDuration(os.Getenv("WALLET_TOPUP_EXPIRE_MINUTES"), time.Minute, cfg.WalletTopupExpiry), &cfg.WalletTopupExpiry)
+		assign(&problems, "WALLET_PAGE_SIZE", parsePositiveInt(os.Getenv("WALLET_PAGE_SIZE"), cfg.WalletPageSize), &cfg.WalletPageSize)
+		assign(&problems, "PAYMENT_REVIEW_PAGE_SIZE", parsePositiveInt(os.Getenv("PAYMENT_REVIEW_PAGE_SIZE"), cfg.PaymentReviewPageSize), &cfg.PaymentReviewPageSize)
 		assign(&problems, "ORDER_EXPIRE_MINUTES", parsePositiveDuration(os.Getenv("ORDER_EXPIRE_MINUTES"), time.Minute, cfg.OrderExpiry), &cfg.OrderExpiry)
 		assign(&problems, "ORDER_MAX_QUANTITY", parsePositiveInt32(os.Getenv("ORDER_MAX_QUANTITY"), cfg.OrderMaxQuantity), &cfg.OrderMaxQuantity)
 		assign(&problems, "PAYMENT_REFERENCE_RANDOM_BYTES", parsePositiveInt(os.Getenv("PAYMENT_REFERENCE_RANDOM_BYTES"), cfg.PaymentReferenceRandomBytes), &cfg.PaymentReferenceRandomBytes)
@@ -330,6 +350,9 @@ func validate(cfg Config, process processKind) []error {
 		}
 		if cfg.OrderPageSize > 20 || cfg.BankAccountPageSize > 20 {
 			problems = append(problems, errors.New("order and bank page sizes must not exceed 20"))
+		}
+		if cfg.WalletTopupMinAmount > cfg.WalletTopupMaxAmount || cfg.WalletPageSize > 20 || cfg.PaymentReviewPageSize > 20 {
+			problems = append(problems, errors.New("wallet amount limits or page sizes are invalid"))
 		}
 		vietQRURL, err := url.Parse(cfg.VietQRBaseURL)
 		if err != nil || vietQRURL.Scheme != "https" || vietQRURL.Host == "" || !validVietQRTemplate(cfg.VietQRTemplate) {

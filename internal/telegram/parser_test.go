@@ -37,6 +37,11 @@ func TestParseCallback(t *testing.T) {
 		{data: "v1:o:v:11", action: CallbackOrderView},
 		{data: "v1:o:x:11:2", action: CallbackOrderAskCancel},
 		{data: "v1:o:k:11:2", action: CallbackOrderCancel},
+		{data: "v1:o:w:11", action: CallbackOrderWalletAsk},
+		{data: "v1:o:y:91:11", action: CallbackOrderWalletPay},
+		{data: "v1:w:v", action: CallbackWalletBalance},
+		{data: "v1:w:a:50000", action: CallbackWalletTopupAmount},
+		{data: "v1:w:b:91:50000:7", action: CallbackWalletTopupBank},
 		{data: "v1:a:ce:3:2", action: CallbackAdminCategoryEdit},
 		{data: "v1:a:ca:3:2:0", action: CallbackAdminCategoryAskToggle},
 		{data: "v1:a:pt:1:2:3:4:1", action: CallbackAdminProductToggle},
@@ -50,6 +55,10 @@ func TestParseCallback(t *testing.T) {
 		{data: "v1:a:be:7:2", action: CallbackAdminBankEdit},
 		{data: "v1:a:ba:7:2:0", action: CallbackAdminBankAskToggle},
 		{data: "v1:a:bt:1:2:7:3:1", action: CallbackAdminBankToggle},
+		{data: "v1:a:pr:0", action: CallbackAdminPaymentReviews},
+		{data: "v1:a:pm", action: CallbackAdminPaymentManual},
+		{data: "v1:a:rr:9", action: CallbackAdminPaymentResolve},
+		{data: "v1:a:wa", action: CallbackAdminWalletAdjustment},
 	}
 	for _, test := range tests {
 		callback, err := ParseCallback(test.data)

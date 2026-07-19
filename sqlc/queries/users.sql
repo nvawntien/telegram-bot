@@ -44,3 +44,8 @@ WHERE users.telegram_user_id = sqlc.arg(telegram_user_id);
 SELECT *
 FROM users
 WHERE telegram_user_id = sqlc.arg(telegram_user_id);
+
+-- name: LockUserByTelegramID :one
+SELECT * FROM users
+WHERE telegram_user_id = sqlc.arg(telegram_user_id)
+FOR UPDATE;

@@ -109,6 +109,29 @@ func (q *Queries) GetUserByTelegramID(ctx context.Context, telegramUserID int64)
 	return i, err
 }
 
+const lockUserByTelegramID = `-- name: LockUserByTelegramID :one
+SELECT id, telegram_user_id, username, display_name, status, ban_reason, last_seen_at, created_at, updated_at FROM users
+WHERE telegram_user_id = $1
+FOR UPDATE
+`
+
+func (q *Queries) LockUserByTelegramID(ctx context.Context, telegramUserID int64) (User, error) {
+	row := q.db.QueryRow(ctx, lockUserByTelegramID, telegramUserID)
+	var i User
+	err := row.Scan(
+		&i.ID,
+		&i.TelegramUserID,
+		&i.Username,
+		&i.DisplayName,
+		&i.Status,
+		&i.BanReason,
+		&i.LastSeenAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const upsertTelegramUser = `-- name: UpsertTelegramUser :one
 INSERT INTO users (
     telegram_user_id,

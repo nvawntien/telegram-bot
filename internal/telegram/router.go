@@ -30,6 +30,8 @@ type Router struct {
 	inventory      *app.InventoryAdminService
 	banks          *app.BankAccountService
 	orders         *app.OrderService
+	wallet         *app.WalletService
+	payments       *app.PaymentAdminService
 	updates        *app.UpdateService
 	messenger      Messenger
 	supportContact string
@@ -61,6 +63,8 @@ func NewRouterWithOrdering(
 	inventory *app.InventoryAdminService,
 	banks *app.BankAccountService,
 	orders *app.OrderService,
+	wallet *app.WalletService,
+	payments *app.PaymentAdminService,
 	updates *app.UpdateService,
 	messenger Messenger,
 	supportContact string,
@@ -70,6 +74,8 @@ func NewRouterWithOrdering(
 	router := NewRouter(users, catalog, admins, inventory, updates, messenger, supportContact, logger, metrics)
 	router.banks = banks
 	router.orders = orders
+	router.wallet = wallet
+	router.payments = payments
 	return router
 }
 
@@ -198,6 +204,32 @@ func (r *Router) handleCommand(
 			return responsePlan{}, err
 		}
 		text, keyboard := OrdersView(page)
+		return responsePlan{chatID: message.Chat.ID, text: text, keyboard: keyboard}, nil
+	case "balance":
+		account, err := r.wallet.Balance(ctx, user.TelegramUserID)
+		if err != nil {
+			return responsePlan{}, err
+		}
+		text, keyboard := WalletBalanceView(account)
+		return responsePlan{chatID: message.Chat.ID, text: text, keyboard: keyboard}, nil
+	case "nap":
+		if command.Payload == "" {
+			account, err := r.wallet.Balance(ctx, user.TelegramUserID)
+			if err != nil {
+				return responsePlan{}, err
+			}
+			text, keyboard := WalletBalanceView(account)
+			return responsePlan{chatID: message.Chat.ID, text: text + "\n\nChọn số tiền muốn nạp.", keyboard: keyboard}, nil
+		}
+		amount, err := strconv.ParseInt(command.Payload, 10, 64)
+		if err != nil || amount <= 0 {
+			return responsePlan{}, app.ErrInvalidWalletAmount
+		}
+		banks, err := r.banks.ListActive(ctx)
+		if err != nil {
+			return responsePlan{}, err
+		}
+		text, keyboard := WalletTopupBankView(updateID, amount, banks)
 		return responsePlan{chatID: message.Chat.ID, text: text, keyboard: keyboard}, nil
 	case "order":
 		orderID, err := strconv.ParseInt(command.Payload, 10, 64)
@@ -350,10 +382,85 @@ func (r *Router) routeCallback(ctx context.Context, telegramID int64, callback C
 		plan.text = fmt.Sprintf("Đã hủy đơn #%d.", result.Order.ID)
 		plan.keyboard = Keyboard{{{Text: "Danh sách đơn", Data: "v1:o:l:0"}}}
 		plan.completedByApp = true
+	case CallbackOrderWalletAsk:
+		order, _, err := r.orders.Get(ctx, telegramID, callback.OrderID)
+		if err != nil {
+			return plan, err
+		}
+		if order.Status != domain.OrderStatusPendingPayment {
+			return plan, app.ErrInvalidOrderState
+		}
+		account, err := r.wallet.Balance(ctx, telegramID)
+		if err != nil {
+			return plan, err
+		}
+		plan.text, plan.keyboard = WalletOrderConfirmationView(order, account, meta.UpdateID)
+	case CallbackOrderWalletPay:
+		result, err := r.wallet.PayOrder(ctx, app.WalletOrderPaymentCommand{
+			TelegramUserID: telegramID, OrderID: callback.OrderID,
+			IdempotencyKey: fmt.Sprintf("telegram-wallet-order:%d", callback.FlowID), Meta: meta,
+		})
+		if err != nil {
+			return plan, err
+		}
+		plan.text = fmt.Sprintf("Đã thanh toán đơn #%d bằng ví. Số dư còn lại: %s ₫. Đơn đang giữ hàng để chờ giao.", result.OrderID, formatVND(result.Balance.Int64()))
+		plan.keyboard, plan.completedByApp = Keyboard{{{Text: "Xem đơn", Data: fmt.Sprintf("v1:o:v:%d", result.OrderID)}}}, true
+	case CallbackWalletBalance:
+		account, err := r.wallet.Balance(ctx, telegramID)
+		if err != nil {
+			return plan, err
+		}
+		plan.text, plan.keyboard = WalletBalanceView(account)
+	case CallbackWalletTopupAmount:
+		banks, err := r.banks.ListActive(ctx)
+		if err != nil {
+			return plan, err
+		}
+		if len(banks) == 0 {
+			return plan, app.ErrBankAccountNotFound
+		}
+		plan.text, plan.keyboard = WalletTopupBankView(meta.UpdateID, callback.AmountVND, banks)
+	case CallbackWalletTopupBank:
+		topup, instruction, _, err := r.wallet.CreateTopup(ctx, app.CreateWalletTopupCommand{
+			TelegramUserID: telegramID, Amount: domain.Money(callback.AmountVND), BankAccountID: callback.BankAccountID,
+			IdempotencyKey: fmt.Sprintf("telegram-wallet-topup:%d", callback.FlowID), Meta: meta,
+		})
+		if err != nil {
+			return plan, err
+		}
+		plan.text, plan.keyboard = WalletTopupInstructionView(topup, instruction)
+		plan.completedByApp = true
 	case CallbackAdminCategories, CallbackAdminProducts:
 		if _, err := r.admins.Authorize(ctx, telegramID, false); err != nil {
 			return plan, err
 		}
+	case CallbackAdminPaymentReviews:
+		page, err := r.payments.ListReviews(ctx, telegramID, callback.Page)
+		if err != nil {
+			return plan, err
+		}
+		plan.text, plan.keyboard = PaymentReviewsView(page)
+	case CallbackAdminPaymentManual:
+		session, err := r.admins.StartSession(ctx, telegramID, app.SessionPaymentManual, workflowPayload{Step: "payment"}, meta)
+		if err != nil {
+			return plan, err
+		}
+		plan.text = "Gửi: transaction_id|reference|amount_vnd|currency|occurred_at_RFC3339|note"
+		plan.keyboard, plan.completedByApp = cancelKeyboard(session), true
+	case CallbackAdminPaymentResolve:
+		session, err := r.admins.StartSession(ctx, telegramID, app.SessionPaymentReview, workflowPayload{Step: "resolution", ReviewID: callback.ReviewID}, meta)
+		if err != nil {
+			return plan, err
+		}
+		plan.text = "Gửi ghi chú resolution. Case sẽ được đánh dấu resolved; không có refund network."
+		plan.keyboard, plan.completedByApp = cancelKeyboard(session), true
+	case CallbackAdminWalletAdjustment:
+		session, err := r.admins.StartSession(ctx, telegramID, app.SessionWalletAdjustment, workflowPayload{Step: "adjustment"}, meta)
+		if err != nil {
+			return plan, err
+		}
+		plan.text = "Gửi: telegram_user_id|credit/debit|amount_vnd|reason|idempotency_key"
+		plan.keyboard, plan.completedByApp = cancelKeyboard(session), true
 		if callback.Action == CallbackAdminCategories {
 			page, err := r.catalog.ListAdminCategories(ctx, callback.Page)
 			if err != nil {
@@ -583,6 +690,7 @@ type workflowPayload struct {
 	SortOrder       int32  `json:"sort_order,omitempty"`
 	PriceVND        int64  `json:"price_vnd,omitempty"`
 	BankAccountID   int64  `json:"bank_account_id,omitempty"`
+	ReviewID        int64  `json:"review_id,omitempty"`
 	BankBIN         string `json:"bank_bin,omitempty"`
 	BankName        string `json:"bank_name,omitempty"`
 	DisplayName     string `json:"display_name,omitempty"`
@@ -654,6 +762,50 @@ func (r *Router) handleSessionText(ctx context.Context, updateID int64, requestI
 		return r.handleProductSessionText(ctx, message, session, payload, meta, plan)
 	case app.SessionBankCreate, app.SessionBankEdit:
 		return r.handleBankSessionText(ctx, message, session, payload, meta, plan)
+	case app.SessionPaymentManual:
+		parts := strings.SplitN(text, "|", 6)
+		if len(parts) != 6 {
+			return responsePlan{}, app.ErrInvalidInput
+		}
+		amount, amountErr := strconv.ParseInt(strings.TrimSpace(parts[2]), 10, 64)
+		occurredAt, timeErr := time.Parse(time.RFC3339, strings.TrimSpace(parts[4]))
+		if amountErr != nil || timeErr != nil {
+			return responsePlan{}, app.ErrInvalidInput
+		}
+		result, err := r.payments.ManualConfirm(ctx, app.ManualPaymentCommand{
+			AdminTelegramID: message.From.ID, Session: session, ProviderTransactionID: strings.TrimSpace(parts[0]),
+			Reference: strings.TrimSpace(parts[1]), Amount: domain.Money(amount), Currency: strings.TrimSpace(parts[3]),
+			OccurredAt: occurredAt, Note: strings.TrimSpace(parts[5]), Meta: meta,
+		})
+		if err != nil {
+			return responsePlan{}, err
+		}
+		plan.text = fmt.Sprintf("Manual payment: %s · target %s · reason %s", result.Decision, result.Target, result.Reason)
+	case app.SessionPaymentReview:
+		if payload.ReviewID <= 0 || text == "" {
+			return responsePlan{}, app.ErrInvalidInput
+		}
+		result, err := r.payments.ResolveReview(ctx, app.ResolvePaymentReviewCommand{AdminTelegramID: message.From.ID, ReviewID: payload.ReviewID, Status: "resolved", Note: text, Session: session, Meta: meta})
+		if err != nil {
+			return responsePlan{}, err
+		}
+		plan.text = fmt.Sprintf("Đã resolve review #%d. Không thực hiện refund network.", result.ID)
+	case app.SessionWalletAdjustment:
+		parts := strings.SplitN(text, "|", 5)
+		if len(parts) != 5 {
+			return responsePlan{}, app.ErrInvalidInput
+		}
+		targetID, targetErr := strconv.ParseInt(strings.TrimSpace(parts[0]), 10, 64)
+		amount, amountErr := strconv.ParseInt(strings.TrimSpace(parts[2]), 10, 64)
+		operation := strings.ToLower(strings.TrimSpace(parts[1]))
+		if targetErr != nil || amountErr != nil || (operation != "credit" && operation != "debit") {
+			return responsePlan{}, app.ErrInvalidInput
+		}
+		account, err := r.wallet.Adjust(ctx, app.WalletAdjustmentCommand{AdminTelegramID: message.From.ID, TargetTelegramID: targetID, Amount: domain.Money(amount), Debit: operation == "debit", Reason: strings.TrimSpace(parts[3]), IdempotencyKey: strings.TrimSpace(parts[4]), Session: session, Meta: meta})
+		if err != nil {
+			return responsePlan{}, err
+		}
+		plan.text = fmt.Sprintf("Đã điều chỉnh ví. Số dư mới: %s ₫", formatVND(account.Balance.Int64()))
 	default:
 		return responsePlan{}, app.ErrStaleVersion
 	}

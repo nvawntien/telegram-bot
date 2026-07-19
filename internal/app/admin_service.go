@@ -13,17 +13,20 @@ import (
 )
 
 const (
-	SessionCategoryCreate  = "category.create"
-	SessionCategoryEdit    = "category.edit"
-	SessionCategoryToggle  = "category.toggle"
-	SessionProductCreate   = "product.create"
-	SessionProductEdit     = "product.edit"
-	SessionProductToggle   = "product.toggle"
-	SessionInventoryImport = "inventory.import"
-	SessionInventoryToggle = "inventory.toggle"
-	SessionBankCreate      = "bank.create"
-	SessionBankEdit        = "bank.edit"
-	SessionBankToggle      = "bank.toggle"
+	SessionCategoryCreate   = "category.create"
+	SessionCategoryEdit     = "category.edit"
+	SessionCategoryToggle   = "category.toggle"
+	SessionProductCreate    = "product.create"
+	SessionProductEdit      = "product.edit"
+	SessionProductToggle    = "product.toggle"
+	SessionInventoryImport  = "inventory.import"
+	SessionInventoryToggle  = "inventory.toggle"
+	SessionBankCreate       = "bank.create"
+	SessionBankEdit         = "bank.edit"
+	SessionBankToggle       = "bank.toggle"
+	SessionPaymentManual    = "payment.manual"
+	SessionPaymentReview    = "payment.review"
+	SessionWalletAdjustment = "wallet.adjustment"
 )
 
 type AdminRepository interface {
@@ -320,7 +323,8 @@ func validSessionState(state string) bool {
 	case SessionCategoryCreate, SessionCategoryEdit, SessionCategoryToggle,
 		SessionProductCreate, SessionProductEdit, SessionProductToggle,
 		SessionInventoryImport, SessionInventoryToggle,
-		SessionBankCreate, SessionBankEdit, SessionBankToggle:
+		SessionBankCreate, SessionBankEdit, SessionBankToggle,
+		SessionPaymentManual, SessionPaymentReview, SessionWalletAdjustment:
 		return true
 	default:
 		return false
