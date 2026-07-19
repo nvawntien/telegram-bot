@@ -2,7 +2,6 @@ package app
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"strings"
 )
@@ -128,11 +127,4 @@ func isDigits(value string, minimum, maximum int) bool {
 		}
 	}
 	return true
-}
-
-func mapBankMutationError(err error) error {
-	if errors.Is(err, ErrConflict) {
-		return ErrConflict
-	}
-	return err
 }
