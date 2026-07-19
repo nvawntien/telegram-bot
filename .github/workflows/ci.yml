@@ -49,5 +49,5 @@ jobs:
           git diff --exit-code -- internal/postgres/generated
       - name: Validate Docker Compose configuration
         run: docker compose config --quiet
-      - name: PostgreSQL integration tests
+      - name: PostgreSQL integration, security, and concurrency tests
         run: make test-integration

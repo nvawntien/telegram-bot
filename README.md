@@ -6,11 +6,13 @@ as a Go modular monolith. The reference repository defines the Telegram product
 experience; this repository redesigns persistence, transactions, concurrency,
 idempotency, auditability, and recovery around PostgreSQL.
 
-Current status: **Phase 3 Telegram catalog administration complete**. The API
+Current status: **Phase 4 encrypted inventory complete**. The API
 accepts secret-verified Telegram webhooks through Gin, durably deduplicates
 updates, serves the active catalog, and provides PostgreSQL-backed, audited
-category/product administration. Order, payment, encrypted inventory,
-delivery, broadcast, and Google Sheet workflows intentionally remain disabled.
+category/product and redacted inventory administration. Authenticated
+application-layer encryption, atomic inventory claim/release, and conservative
+reservation recovery are implemented. Customer order, payment, delivery,
+broadcast, and Google Sheet workflows intentionally remain disabled.
 
 ## Architecture
 
@@ -162,15 +164,19 @@ Customer commands:
 - `/support`: show the validated `SUPPORT_CONTACT` value.
 - `/myid`: show the caller's Telegram ID, never an internal database ID.
 
-`/admin` opens catalog administration only for an active PostgreSQL admin. The
+`/admin` opens administration only for an active PostgreSQL admin. The
 durable multi-step menus can list, create, edit, activate, or deactivate
 categories and products, change product category, and set integer VND prices.
-Cancel buttons close the persisted session. Catalog mutations, before/after
-audit records, session completion, and update completion commit atomically.
+The inventory menu shows per-product status counts, paginates redacted item
+metadata, imports one opaque item per line, disables available items, and
+re-enables disabled items. It never reveals or exports inventory plaintext,
+ciphertext, nonce, or fingerprint. Cancel buttons close the persisted session.
+Catalog and inventory mutations, safe audit metadata, session completion, and
+update completion commit atomically.
 
 Banned/disabled users are denied. Unknown commands get a short menu hint.
 There are deliberately no `/orders`, `/checkpay`, `/nap`, or `/buy` flows in
-Phase 3.
+Phase 4, and encrypted items are not delivered to customers yet.
 
 ## HTTP endpoints
 
@@ -196,14 +202,34 @@ dependency. API configuration requires:
 - `TELEGRAM_WEBHOOK_URL` (HTTPS in production)
 - `ADMIN_TELEGRAM_IDS` (comma-separated positive IDs)
 - `INVENTORY_ENCRYPTION_KEY` (exactly 32 bytes after standard-base64 decoding)
+- `INVENTORY_ENCRYPTION_KEY_VERSION` (positive integer written to every new
+  inventory item)
 
-Phase 3 API controls include `TELEGRAM_WEBHOOK_BODY_LIMIT_BYTES`,
+Inventory import is bounded by `INVENTORY_IMPORT_MAX_ITEMS`,
+`INVENTORY_IMPORT_MAX_ITEM_BYTES`, and `INVENTORY_IMPORT_MAX_TOTAL_BYTES`.
+One LF-delimited line is one opaque item; a terminal CR is removed for CRLF,
+blank or whitespace-only lines are counted as rejected, and every other byte is
+preserved. Embedded newlines are not supported.
+
+Do not change or lose the encryption key while rows using its version exist.
+Losing it makes those rows permanently undecryptable; replacing it under the
+same version makes authentication fail. Phase 4 has a future-readable keyring
+seam but no rotation command. Keep keys outside PostgreSQL and Git.
+
+Other API controls include `TELEGRAM_WEBHOOK_BODY_LIMIT_BYTES`,
 `TELEGRAM_WEBHOOK_TIMEOUT_SECONDS`, `TELEGRAM_UPDATE_STALE_SECONDS`,
 `ADMIN_SESSION_TTL_MINUTES`, `TELEGRAM_API_TIMEOUT_SECONDS`, and
 `SUPPORT_CONTACT`. Operational variables and defaults are documented in
 `.env.example`. The worker uses a separate loader and therefore does not require
-HTTP/webhook-only settings. The migration process requires only `DATABASE_URL`
-and an optional `MIGRATIONS_DIR`.
+Telegram tokens, admin bootstrap IDs, HTTP/webhook settings, or the inventory
+key. The migration process requires only `DATABASE_URL` and an optional
+`MIGRATIONS_DIR`.
+
+Back up PostgreSQL with authenticated access controls appropriate to the
+deployment. A backup contains ciphertext rather than plaintext inventory, but
+still exposes operational metadata and remains sensitive. Back up encryption
+keys separately with version labels and test restores; a database backup
+without the matching key cannot recover inventory.
 
 ## Design documents
 
@@ -213,9 +239,13 @@ and an optional `MIGRATIONS_DIR`.
 - [Order state machine](docs/design/order-state-machine.md)
 - [Transaction boundaries](docs/design/transaction-boundaries.md)
 - [Roadmap and risks](docs/design/roadmap-and-risks.md)
+- [Inventory encryption](docs/design/inventory-encryption.md)
+- [Inventory administration security](docs/design/inventory-admin-security.md)
+- [Inventory reservation](docs/design/inventory-reservation.md)
 - [Phase 1 completion report](docs/phase-1-report.md)
 - [Phase 2 completion report](docs/phase-2-report.md)
 - [Phase 3 completion report](docs/phase-3-report.md)
+- [Phase 4 completion report](docs/phase-4-report.md)
 
 ## Repository layout
 
@@ -223,7 +253,8 @@ and an optional `MIGRATIONS_DIR`.
 cmd/                    api, worker, migrate commands
 internal/config/        environment parsing and validation
 internal/httpapi/       Gin server, middleware, health endpoints
-internal/app/           user, catalog, receipt, and admin application services
+internal/app/           user, catalog, receipt, admin, and inventory services
+internal/inventorycrypto/ versioned encryption and keyed fingerprints
 internal/telegram/      Telegram client, typed router, callbacks, and views
 internal/observability/ slog and Prometheus metrics
 internal/postgres/      pgx lifecycle and generated sqlc code
@@ -239,11 +270,13 @@ created when they gain working behaviour, not as empty skeletons.
 
 ## Current limitations
 
-- Telegram confirmation delivery has no outbox in Phase 3. If sending after a
+- Telegram confirmation delivery has no outbox in Phase 4. If sending after a
   successful commit fails, the database operation stays committed and the error
   is logged/measured; a duplicate update does not resend it.
-- Order, payment, wallet, encrypted inventory, and delivery services are not
-  implemented yet.
+- Claim/release primitives do not create orders or deliver decrypted items.
+  Order creation, payment, wallet, and delivery services are not implemented.
+- Automatic reservation sweeping is deferred because no payment/delivery
+  recovery flow can safely resolve sensitive order states yet.
 - The worker currently monitors its PostgreSQL dependency; durable job types
   and external delivery begin in later phases.
 - Compose values are suitable only for local development.

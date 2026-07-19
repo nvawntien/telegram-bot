@@ -36,14 +36,17 @@ runtime admin authorization and sessions are durable; concurrent updates are
 deduplicated; catalog changes, audit, session completion, and receipt completion
 are atomic; handlers contain no SQL/status writes.
 
-### Phase 4 — encrypted inventory
+### Phase 4 — encrypted inventory (implemented)
 
 1. Implement versioned AES-GCM envelope/HMAC fingerprint and key validation.
 2. Add import/list/disable services with redacted outputs.
 3. Add atomic claim/release queries and 100-goroutine last-item test.
 
-Exit: database/log/audit contain no plaintext; exactly one concurrent claimant
-wins the last item.
+Exit achieved: AES-GCM/HKDF/HMAC design is versioned; admin outputs are
+redacted; import is durable and duplicate-safe; claim/release is atomic;
+sensitive expired reservations are held for recovery; observable persistence,
+logs, metrics, callbacks, and Telegram responses contain no plaintext; exactly
+one of 100 concurrent claimants wins the last item.
 
 ### Phase 5 — orders and VietQR
 
@@ -91,7 +94,7 @@ Exit: remaining Definition of Done checks and restore drill pass.
 | Payment webhook semantics are provider-specific and currently unspecified | False credit or replay | Provider fixture contract, HMAC/signature verification, unique event and transaction IDs, exact amount/reference checks |
 | Telegram Bot API has rate limits and ambiguous timeout outcomes | Duplicate or missing delivery | Durable attempts, idempotent completion, retry-after support, manual recovery view; never mark delivered before success |
 | Digital goods are high-value secrets | Credential disclosure | AES-256-GCM, separate HMAC fingerprint key, key IDs/rotation, redacted logs/audit, least-privilege DB access |
-| `SKIP LOCKED` code looks correct but fails under real contention | Oversell | PostgreSQL integration test with 100 goroutines and multiple pools; unique inventory mapping constraint |
+| `SKIP LOCKED` code looks correct but fails under real contention | Oversell | PostgreSQL integration tests with 100 goroutines and multiple concurrent orders; partial unique active-mapping constraint |
 | Late payment races expiry | Wrong delivery/refund | Same order row lock, state recheck, explicit `payment_review`, deterministic operator flow |
 | Outbox worker dies while processing | Stuck fulfilment | Leases, expired-lease reclamation, max attempts, bounded backoff, multi-worker test |
 | Telegram send succeeds but response is lost | Possible duplicate credential message | Persist attempt marker, reconcile ambiguous failures conservatively, admin review after bounded retry; do not expose item to another buyer |

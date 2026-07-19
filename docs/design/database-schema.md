@@ -1,6 +1,6 @@
 # Implemented PostgreSQL schema
 
-Phase 2 implements the schema in goose migrations `00001` through `00013`.
+The implemented schema spans goose migrations `00001` through `00015`.
 Business rows use `bigint GENERATED ALWAYS AS IDENTITY`; Telegram identifiers
 remain external `bigint` values. This keeps joins and queue indexes compact while
 supporting Telegram's signed 64-bit identifier range.
@@ -40,6 +40,8 @@ supporting Telegram's signed 64-bit identifier range.
 | `00011_admin_sessions_audit` | `admin_sessions`, `audit_logs` |
 | `00012_sheet_sync` | `sheet_sync_runs` |
 | `00013_shop_settings` | singleton `shop_settings` |
+| `00014_telegram_phase3` | durable Telegram receipts and audit correlation |
+| `00015_encrypted_inventory` | AES-GCM envelope metadata and reservation history |
 
 Each file has a dependency-safe `Down` section. Integration tests prove the
 full `up -> down-to-zero -> up` cycle in an isolated schema.
@@ -64,8 +66,11 @@ URL, while inventory delivery forbids one. The
 `products(category_id, is_active, id)` index matches the active catalog query.
 Products deliberately contain no stock counter.
 
-Each `inventory_items` row represents one encrypted digital good. It stores an
-encrypted envelope, key ID, and a 32-byte fingerprint unique per product. State
+Each `inventory_items` row represents one encrypted digital good. Phase 4 rows
+store ciphertext, a 12-byte nonce, `aes-256-gcm-v1` format, positive key
+version, operational key ID, importing admin, optimistic version, and a 32-byte
+keyed fingerprint unique per product. Legacy Phase 2 rows remain compatible as
+`legacy-v0`; the Phase 4 adapter does not claim it can decrypt them. State
 consistency is enforced as follows:
 
 - `available`: no reservation, sale, or disabled reason;
@@ -75,8 +80,14 @@ consistency is enforced as follows:
 
 The partial claim index orders available items by `(product_id, created_at,
 id)`, matching the `FOR UPDATE SKIP LOCKED` query. A second partial index finds
-expired reservations. `order_inventory_items` has a unique inventory ID and a
-composite foreign key proving its order item belongs to the same order.
+expired reservations; a reserved-order index supports release/recovery. The
+product/fingerprint unique constraint is the duplicate race authority.
+
+`order_inventory_items` preserves history with `active` or `released` state,
+release timestamp, and typed reason. A partial unique index permits only one
+active mapping per inventory item while allowing a released item to be claimed
+again later. A composite foreign key proves the order item belongs to the same
+order; `(order_id,status,inventory_item_id)` supports release/history queries.
 
 ## Orders
 
@@ -134,7 +145,9 @@ with an optional restricted foreign key to the default bank account.
 
 ## Encryption boundary
 
-The schema stores only encrypted inventory/account data, key identifiers, and
-fixed-size fingerprints. AES-GCM envelope creation, HMAC fingerprinting, and key
-rotation are Phase 4 application concerns. No committed integration fixture
-contains plaintext inventory credentials.
+The schema stores only encrypted inventory data, nonce, versioned format/key
+metadata, and fixed-size fingerprints. AES-GCM envelope creation and HMAC
+fingerprinting happen in the application adapter, not SQL. PostgreSQL never
+stores the master key. Audit/session/receipt rows retain IDs, versions, states,
+counts, and correlation only. Rotation execution remains a later operational
+feature.

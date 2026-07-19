@@ -53,8 +53,9 @@ record. Bootstrap is intentionally idempotent and does not create a startup
 audit row, avoiding repeated audit noise; runtime authorization always reads
 `users` and `admins` from PostgreSQL.
 
-The sections below define transaction boundaries for later application
-services; they are not implemented in Phase 3.
+The inventory sections below are implemented in Phase 4. Order, payment,
+wallet, delivery, outbox, broadcast, and Sheet workflow sections remain target
+boundaries for later phases.
 
 ## Create order
 
@@ -143,10 +144,49 @@ the refund/recovery use case and cannot use simple cancellation.
 
 ## Inventory import
 
-Encrypt each validated line before the transaction. Insert batches with unique
-`(product_id,payload_fingerprint)` and `ON CONFLICT DO NOTHING`; record imported
-and duplicate counts plus audit in the same transaction. Plaintext is discarded
-after encryption and never enters logs/errors.
+The application validates and parses the message, then creates AES-GCM envelopes
+and keyed fingerprints before opening the write transaction. If cryptography
+fails, no database write has started. Best-effort clearing shortens the lifetime
+of temporary byte slices without claiming process-memory zeroization.
+
+The write transaction reauthorizes the active admin, locks/verifies the durable
+session owner/state/expiry/version, verifies an inventory product, inserts each
+envelope with unique `(product_id,payload_fingerprint)` and `ON CONFLICT DO
+NOTHING`, writes one count-only audit summary, completes the session, and
+completes the Telegram receipt. Database, audit, session, or receipt failure
+rolls all inserted rows back. Telegram summary delivery occurs after commit.
+
+## Inventory disable and re-enable
+
+One transaction reauthorizes the admin, locks/verifies the toggle session and
+redacted item metadata, checks optimistic version and typed transition, updates
+`available -> disabled` or `disabled -> available` with a SQL state/version
+guard, writes a metadata-only audit, completes the session, and completes the
+receipt. Reserved and sold rows cannot pass the guard.
+
+## Inventory claim
+
+The service validates positive quantity and a future bounded deadline. One
+transaction locks the existing order, requires `reserving`, locks the matching
+order item, and requires its exact product/quantity. Ordered `FOR UPDATE SKIP
+LOCKED` changes only `available` authenticated Phase 4 rows to `reserved`;
+mapping rows and a safe
+system audit are inserted in the same transaction. A short selection or any
+mapping/audit error returns an error, rolling every selected row back. Claim
+returns IDs only and never decrypts inventory.
+
+## Inventory release and recovery
+
+Release locks the order and accepts only the typed reason implied by
+`cancelled`, `expired`, `refunded`, or `out_of_stock`. It locks reserved rows
+owned by that order, returns them to available, marks active mappings released
+with timestamp/reason, and writes audit in one transaction. No matching rows is
+an idempotent zero release; mapping history is never deleted.
+
+Recovery locks the order and first verifies that an expired reservation exists.
+Safe terminal outcomes use the same release transaction. Sensitive states keep
+the item reserved and insert at most one recovery-required audit marker per
+order/status. Time alone never returns inventory to sale.
 
 ## Broadcast
 
