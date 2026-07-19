@@ -29,7 +29,7 @@ SET status = 'processing',
     locked_by = $1
 FROM selected_events
 WHERE event.id = selected_events.id
-RETURNING event.id, event.event_type, event.aggregate_type, event.aggregate_id, event.deduplication_key, event.payload, event.status, event.attempts, event.max_attempts, event.next_attempt_at, event.locked_at, event.locked_by, event.last_error_code, event.last_error_detail, event.completed_at, event.created_at, event.updated_at
+RETURNING event.id, event.event_type, event.aggregate_type, event.aggregate_id, event.deduplication_key, event.payload, event.status, event.attempts, event.max_attempts, event.next_attempt_at, event.locked_at, event.locked_by, event.last_error_code, event.last_error_detail, event.completed_at, event.created_at, event.updated_at, event.delivery_order_id, event.recipient_chat_id, event.processing_stage, event.send_attempted_at, event.telegram_message_id, event.telegram_sent_at, event.manual_resolution, event.resolution_reason, event.resolved_by_admin_id, event.resolved_at, event.version
 `
 
 type ClaimPendingOutboxEventsParams struct {
@@ -64,6 +64,17 @@ func (q *Queries) ClaimPendingOutboxEvents(ctx context.Context, arg ClaimPending
 			&i.CompletedAt,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.DeliveryOrderID,
+			&i.RecipientChatID,
+			&i.ProcessingStage,
+			&i.SendAttemptedAt,
+			&i.TelegramMessageID,
+			&i.TelegramSentAt,
+			&i.ManualResolution,
+			&i.ResolutionReason,
+			&i.ResolvedByAdminID,
+			&i.ResolvedAt,
+			&i.Version,
 		); err != nil {
 			return nil, err
 		}
@@ -93,7 +104,7 @@ INSERT INTO outbox_events (
     $6,
     $7
 )
-RETURNING id, event_type, aggregate_type, aggregate_id, deduplication_key, payload, status, attempts, max_attempts, next_attempt_at, locked_at, locked_by, last_error_code, last_error_detail, completed_at, created_at, updated_at
+RETURNING id, event_type, aggregate_type, aggregate_id, deduplication_key, payload, status, attempts, max_attempts, next_attempt_at, locked_at, locked_by, last_error_code, last_error_detail, completed_at, created_at, updated_at, delivery_order_id, recipient_chat_id, processing_stage, send_attempted_at, telegram_message_id, telegram_sent_at, manual_resolution, resolution_reason, resolved_by_admin_id, resolved_at, version
 `
 
 type InsertOutboxEventParams struct {
@@ -135,6 +146,17 @@ func (q *Queries) InsertOutboxEvent(ctx context.Context, arg InsertOutboxEventPa
 		&i.CompletedAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.DeliveryOrderID,
+		&i.RecipientChatID,
+		&i.ProcessingStage,
+		&i.SendAttemptedAt,
+		&i.TelegramMessageID,
+		&i.TelegramSentAt,
+		&i.ManualResolution,
+		&i.ResolutionReason,
+		&i.ResolvedByAdminID,
+		&i.ResolvedAt,
+		&i.Version,
 	)
 	return i, err
 }
@@ -150,7 +172,7 @@ SET status = 'completed',
 WHERE id = $1
   AND status = 'processing'
   AND locked_by = $2
-RETURNING id, event_type, aggregate_type, aggregate_id, deduplication_key, payload, status, attempts, max_attempts, next_attempt_at, locked_at, locked_by, last_error_code, last_error_detail, completed_at, created_at, updated_at
+RETURNING id, event_type, aggregate_type, aggregate_id, deduplication_key, payload, status, attempts, max_attempts, next_attempt_at, locked_at, locked_by, last_error_code, last_error_detail, completed_at, created_at, updated_at, delivery_order_id, recipient_chat_id, processing_stage, send_attempted_at, telegram_message_id, telegram_sent_at, manual_resolution, resolution_reason, resolved_by_admin_id, resolved_at, version
 `
 
 type MarkOutboxEventCompletedParams struct {
@@ -179,6 +201,17 @@ func (q *Queries) MarkOutboxEventCompleted(ctx context.Context, arg MarkOutboxEv
 		&i.CompletedAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.DeliveryOrderID,
+		&i.RecipientChatID,
+		&i.ProcessingStage,
+		&i.SendAttemptedAt,
+		&i.TelegramMessageID,
+		&i.TelegramSentAt,
+		&i.ManualResolution,
+		&i.ResolutionReason,
+		&i.ResolvedByAdminID,
+		&i.ResolvedAt,
+		&i.Version,
 	)
 	return i, err
 }
@@ -195,7 +228,7 @@ WHERE id = $4
   AND status = 'processing'
   AND locked_by = $5
   AND attempts < max_attempts
-RETURNING id, event_type, aggregate_type, aggregate_id, deduplication_key, payload, status, attempts, max_attempts, next_attempt_at, locked_at, locked_by, last_error_code, last_error_detail, completed_at, created_at, updated_at
+RETURNING id, event_type, aggregate_type, aggregate_id, deduplication_key, payload, status, attempts, max_attempts, next_attempt_at, locked_at, locked_by, last_error_code, last_error_detail, completed_at, created_at, updated_at, delivery_order_id, recipient_chat_id, processing_stage, send_attempted_at, telegram_message_id, telegram_sent_at, manual_resolution, resolution_reason, resolved_by_admin_id, resolved_at, version
 `
 
 type ScheduleOutboxRetryParams struct {
@@ -233,6 +266,17 @@ func (q *Queries) ScheduleOutboxRetry(ctx context.Context, arg ScheduleOutboxRet
 		&i.CompletedAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.DeliveryOrderID,
+		&i.RecipientChatID,
+		&i.ProcessingStage,
+		&i.SendAttemptedAt,
+		&i.TelegramMessageID,
+		&i.TelegramSentAt,
+		&i.ManualResolution,
+		&i.ResolutionReason,
+		&i.ResolvedByAdminID,
+		&i.ResolvedAt,
+		&i.Version,
 	)
 	return i, err
 }

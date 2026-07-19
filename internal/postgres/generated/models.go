@@ -117,6 +117,13 @@ type DeliveryAttempt struct {
 	FinishedAt        pgtype.Timestamptz `db:"finished_at" json:"finished_at"`
 	CreatedAt         pgtype.Timestamptz `db:"created_at" json:"created_at"`
 	UpdatedAt         pgtype.Timestamptz `db:"updated_at" json:"updated_at"`
+	DeliveryJobID     pgtype.Int8        `db:"delivery_job_id" json:"delivery_job_id"`
+	TelegramMethod    string             `db:"telegram_method" json:"telegram_method"`
+	HttpStatus        pgtype.Int4        `db:"http_status" json:"http_status"`
+	TelegramErrorCode pgtype.Int4        `db:"telegram_error_code" json:"telegram_error_code"`
+	RetryAfterSeconds pgtype.Int4        `db:"retry_after_seconds" json:"retry_after_seconds"`
+	TelegramChatID    pgtype.Int8        `db:"telegram_chat_id" json:"telegram_chat_id"`
+	ErrorClass        pgtype.Text        `db:"error_class" json:"error_class"`
 }
 
 type InventoryItem struct {
@@ -202,23 +209,34 @@ type OrderStatusHistory struct {
 }
 
 type OutboxEvent struct {
-	ID               int64              `db:"id" json:"id"`
-	EventType        string             `db:"event_type" json:"event_type"`
-	AggregateType    string             `db:"aggregate_type" json:"aggregate_type"`
-	AggregateID      int64              `db:"aggregate_id" json:"aggregate_id"`
-	DeduplicationKey string             `db:"deduplication_key" json:"deduplication_key"`
-	Payload          []byte             `db:"payload" json:"payload"`
-	Status           string             `db:"status" json:"status"`
-	Attempts         int32              `db:"attempts" json:"attempts"`
-	MaxAttempts      int32              `db:"max_attempts" json:"max_attempts"`
-	NextAttemptAt    pgtype.Timestamptz `db:"next_attempt_at" json:"next_attempt_at"`
-	LockedAt         pgtype.Timestamptz `db:"locked_at" json:"locked_at"`
-	LockedBy         pgtype.Text        `db:"locked_by" json:"locked_by"`
-	LastErrorCode    pgtype.Text        `db:"last_error_code" json:"last_error_code"`
-	LastErrorDetail  pgtype.Text        `db:"last_error_detail" json:"last_error_detail"`
-	CompletedAt      pgtype.Timestamptz `db:"completed_at" json:"completed_at"`
-	CreatedAt        pgtype.Timestamptz `db:"created_at" json:"created_at"`
-	UpdatedAt        pgtype.Timestamptz `db:"updated_at" json:"updated_at"`
+	ID                int64              `db:"id" json:"id"`
+	EventType         string             `db:"event_type" json:"event_type"`
+	AggregateType     string             `db:"aggregate_type" json:"aggregate_type"`
+	AggregateID       int64              `db:"aggregate_id" json:"aggregate_id"`
+	DeduplicationKey  string             `db:"deduplication_key" json:"deduplication_key"`
+	Payload           []byte             `db:"payload" json:"payload"`
+	Status            string             `db:"status" json:"status"`
+	Attempts          int32              `db:"attempts" json:"attempts"`
+	MaxAttempts       int32              `db:"max_attempts" json:"max_attempts"`
+	NextAttemptAt     pgtype.Timestamptz `db:"next_attempt_at" json:"next_attempt_at"`
+	LockedAt          pgtype.Timestamptz `db:"locked_at" json:"locked_at"`
+	LockedBy          pgtype.Text        `db:"locked_by" json:"locked_by"`
+	LastErrorCode     pgtype.Text        `db:"last_error_code" json:"last_error_code"`
+	LastErrorDetail   pgtype.Text        `db:"last_error_detail" json:"last_error_detail"`
+	CompletedAt       pgtype.Timestamptz `db:"completed_at" json:"completed_at"`
+	CreatedAt         pgtype.Timestamptz `db:"created_at" json:"created_at"`
+	UpdatedAt         pgtype.Timestamptz `db:"updated_at" json:"updated_at"`
+	DeliveryOrderID   pgtype.Int8        `db:"delivery_order_id" json:"delivery_order_id"`
+	RecipientChatID   pgtype.Int8        `db:"recipient_chat_id" json:"recipient_chat_id"`
+	ProcessingStage   pgtype.Text        `db:"processing_stage" json:"processing_stage"`
+	SendAttemptedAt   pgtype.Timestamptz `db:"send_attempted_at" json:"send_attempted_at"`
+	TelegramMessageID pgtype.Int8        `db:"telegram_message_id" json:"telegram_message_id"`
+	TelegramSentAt    pgtype.Timestamptz `db:"telegram_sent_at" json:"telegram_sent_at"`
+	ManualResolution  pgtype.Text        `db:"manual_resolution" json:"manual_resolution"`
+	ResolutionReason  pgtype.Text        `db:"resolution_reason" json:"resolution_reason"`
+	ResolvedByAdminID pgtype.Int8        `db:"resolved_by_admin_id" json:"resolved_by_admin_id"`
+	ResolvedAt        pgtype.Timestamptz `db:"resolved_at" json:"resolved_at"`
+	Version           int64              `db:"version" json:"version"`
 }
 
 type Payment struct {
