@@ -34,7 +34,7 @@ INSERT INTO payment_events (
     'received',
     sqlc.arg(max_attempts)
 )
-ON CONFLICT (provider, external_event_id) DO NOTHING
+ON CONFLICT DO NOTHING
 RETURNING *;
 
 -- name: GetPaymentEventByProviderEventID :one

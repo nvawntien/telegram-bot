@@ -48,6 +48,10 @@ func TestSignedJSONRejectsSignatureTamperingAndReplay(t *testing.T) {
 			return http.Header{"X-Payment-Signature": []string{strings.Repeat("00", 32)}, "X-Payment-Timestamp": []string{fmt.Sprint(now.Unix())}}
 		}, want: app.ErrInvalidWebhookSignature},
 		{name: "tampered body", body: []byte("{}"), headers: func([]byte) http.Header { return signedHeaders(validBody(now), now) }, want: app.ErrInvalidWebhookSignature},
+		{name: "whitespace modified body", body: append(validBody(now), ' '), headers: func([]byte) http.Header { return signedHeaders(validBody(now), now) }, want: app.ErrInvalidWebhookSignature},
+		{name: "malformed signature", body: validBody(now), headers: func([]byte) http.Header {
+			return http.Header{"X-Payment-Signature": []string{"not-hex"}, "X-Payment-Timestamp": []string{fmt.Sprint(now.Unix())}}
+		}, want: app.ErrInvalidWebhookSignature},
 		{name: "old timestamp", body: validBody(now.Add(-time.Minute - time.Second)), headers: func(body []byte) http.Header { return signedHeaders(body, now.Add(-time.Minute-time.Second)) }, want: app.ErrWebhookReplay},
 		{name: "future timestamp", body: validBody(now.Add(time.Minute + time.Second)), headers: func(body []byte) http.Header { return signedHeaders(body, now.Add(time.Minute+time.Second)) }, want: app.ErrWebhookReplay},
 	}
@@ -59,6 +63,47 @@ func TestSignedJSONRejectsSignatureTamperingAndReplay(t *testing.T) {
 				t.Fatalf("error = %v, want %v", err, test.want)
 			}
 		})
+	}
+}
+
+func TestSignedJSONRejectsMalformedPaymentFields(t *testing.T) {
+	now := time.Date(2026, 7, 19, 8, 0, 0, 0, time.UTC)
+	valid := string(validBody(now))
+	tests := []struct {
+		name string
+		body string
+	}{
+		{name: "empty body", body: ""},
+		{name: "malformed JSON", body: "{"},
+		{name: "missing event ID", body: strings.Replace(valid, `"event_id":"event-1"`, `"event_id":""`, 1)},
+		{name: "missing transaction ID", body: strings.Replace(valid, `"transaction_id":"transaction-1"`, `"transaction_id":""`, 1)},
+		{name: "invalid direction", body: strings.Replace(valid, `"direction":"inbound"`, `"direction":"unknown"`, 1)},
+		{name: "invalid amount", body: strings.Replace(valid, `"amount_vnd":125000`, `"amount_vnd":0`, 1)},
+		{name: "invalid currency", body: strings.Replace(valid, `"currency":"VND"`, `"currency":"USD"`, 1)},
+		{name: "invalid occurred at", body: strings.Replace(valid, now.Format(time.RFC3339), "0001-01-01T00:00:00Z", 1)},
+		{name: "missing destination", body: strings.Replace(valid, `"destination_account_identity":"reference-account-1"`, `"destination_account_identity":""`, 1)},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			verifier := newTestVerifier(t, now, time.Minute)
+			body := []byte(test.body)
+			_, err := verifier.VerifyAndNormalize(context.Background(), signedHeaders(body, now), body)
+			if !errors.Is(err, app.ErrInvalidInput) {
+				t.Fatalf("error = %v", err)
+			}
+			if strings.Contains(fmt.Sprint(err), testSigningSecret) {
+				t.Fatalf("error leaked secret: %v", err)
+			}
+		})
+	}
+}
+
+func TestSignedJSONNormalizesOutboundDirection(t *testing.T) {
+	now := time.Date(2026, 7, 19, 8, 0, 0, 0, time.UTC)
+	body := []byte(strings.Replace(string(validBody(now)), `"direction":"inbound"`, `"direction":"outbound"`, 1))
+	event, err := newTestVerifier(t, now, time.Minute).VerifyAndNormalize(context.Background(), signedHeaders(body, now), body)
+	if err != nil || event.Direction != "outbound" {
+		t.Fatalf("event = %+v, err=%v", event, err)
 	}
 }
 

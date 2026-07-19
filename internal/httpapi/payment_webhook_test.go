@@ -30,6 +30,34 @@ func (f paymentIngesterFunc) Ingest(ctx context.Context, event app.NormalizedPay
 	return f(ctx, event)
 }
 
+type typedWebhookProvider struct {
+	name    payment.ProviderName
+	enabled bool
+	ack     payment.WebhookAcknowledgement
+}
+
+func (p typedWebhookProvider) Name() payment.ProviderName             { return p.name }
+func (p typedWebhookProvider) Enabled() bool                          { return p.enabled }
+func (typedWebhookProvider) Environment() payment.ProviderEnvironment { return payment.EnvironmentTest }
+func (typedWebhookProvider) Capabilities() payment.ProviderCapabilities {
+	return payment.ProviderCapabilities{SupportsWebhook: true, SupportsTestMode: true}
+}
+func (p typedWebhookProvider) VerifyAndNormalizeWebhook(context.Context, payment.WebhookRequest) (app.NormalizedPaymentEvent, payment.WebhookAcknowledgement, error) {
+	return app.NormalizedPaymentEvent{Provider: string(p.name), Source: "webhook"}, p.ack, nil
+}
+
+type typedAPIOnlyProvider struct{}
+
+func (typedAPIOnlyProvider) Name() payment.ProviderName               { return "api_only" }
+func (typedAPIOnlyProvider) Enabled() bool                            { return true }
+func (typedAPIOnlyProvider) Environment() payment.ProviderEnvironment { return payment.EnvironmentTest }
+func (typedAPIOnlyProvider) Capabilities() payment.ProviderCapabilities {
+	return payment.ProviderCapabilities{SupportsReconciliation: true, SupportsTestMode: true}
+}
+func (typedAPIOnlyProvider) ListTransactions(context.Context, payment.ListTransactionsRequest) (payment.TransactionPage, error) {
+	return payment.TransactionPage{}, nil
+}
+
 func TestPaymentWebhookPolicy(t *testing.T) {
 	validEvent := app.NormalizedPaymentEvent{Provider: "signed_json", ExternalEventID: "e", ProviderTransactionID: "t", Reference: "TS-ABC", Amount: 1, Currency: "VND", OccurredAt: time.Now(), EventType: "payment.received", PayloadHash: make([]byte, 32), SanitizedMetadata: []byte(`{}`)}
 	tests := []struct {
@@ -60,6 +88,45 @@ func TestPaymentWebhookPolicy(t *testing.T) {
 			handler.ServeHTTP(response, request)
 			if response.Code != test.want {
 				t.Fatalf("status = %d, want %d; body=%s", response.Code, test.want, response.Body.String())
+			}
+		})
+	}
+}
+
+func TestPaymentWebhookProviderCapabilityAndAcknowledgement(t *testing.T) {
+	tests := []struct {
+		name     string
+		provider payment.Provider
+		path     string
+		want     int
+		body     string
+		header   string
+	}{
+		{name: "disabled", provider: typedWebhookProvider{name: "disabled", enabled: false, ack: payment.JSONAcknowledgement(202, []byte(`{}`))}, path: "disabled", want: http.StatusNotFound},
+		{name: "API only", provider: typedAPIOnlyProvider{}, path: "api_only", want: http.StatusNotFound},
+		{name: "provider acknowledgement", provider: typedWebhookProvider{name: "custom", enabled: true, ack: payment.WebhookAcknowledgement{StatusCode: 204, Headers: map[string]string{"Content-Type": "text/plain", "X-Provider-ACK": "ok"}, Body: nil}}, path: "custom", want: http.StatusNoContent, header: "ok"},
+		{name: "invalid acknowledgement status", provider: typedWebhookProvider{name: "bad_status", enabled: true, ack: payment.JSONAcknowledgement(500, []byte(`{}`))}, path: "bad_status", want: http.StatusServiceUnavailable},
+		{name: "invalid acknowledgement secret header", provider: typedWebhookProvider{name: "bad_header", enabled: true, ack: payment.WebhookAcknowledgement{StatusCode: 202, Headers: map[string]string{"Content-Type": "application/json", "Authorization": "secret"}, Body: []byte(`{}`)}}, path: "bad_header", want: http.StatusServiceUnavailable},
+		{name: "invalid acknowledgement oversized", provider: typedWebhookProvider{name: "bad_body", enabled: true, ack: payment.WebhookAcknowledgement{StatusCode: 202, Headers: map[string]string{"Content-Type": "application/json"}, Body: []byte(strings.Repeat("x", 4097))}}, path: "bad_body", want: http.StatusServiceUnavailable},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			registry, err := payment.NewProviderRegistry(test.provider)
+			if err != nil {
+				t.Fatal(err)
+			}
+			handler := newPaymentWebhookTestServer(t, registry, paymentIngesterFunc(func(context.Context, app.NormalizedPaymentEvent) (app.PaymentEventIngestionResult, error) {
+				return app.PaymentEventIngestionResult{}, nil
+			}), 1024)
+			request := httptest.NewRequest(http.MethodPost, "/webhooks/payments/"+test.path, strings.NewReader(`{}`))
+			request.Header.Set("Content-Type", "application/json")
+			response := httptest.NewRecorder()
+			handler.ServeHTTP(response, request)
+			if response.Code != test.want || (test.header != "" && response.Header().Get("X-Provider-ACK") != test.header) {
+				t.Fatalf("response = %d headers=%v body=%s", response.Code, response.Header(), response.Body.String())
+			}
+			if strings.Contains(response.Body.String(), "secret") {
+				t.Fatalf("response leaked secret: %s", response.Body.String())
 			}
 		})
 	}

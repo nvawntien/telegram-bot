@@ -575,7 +575,7 @@ INSERT INTO payment_events (
     'received',
     $15
 )
-ON CONFLICT (provider, external_event_id) DO NOTHING
+ON CONFLICT DO NOTHING
 RETURNING id, provider, external_event_id, provider_transaction_id, event_type, payload_hash, sanitized_payload, signature_verified, processing_status, processing_error, received_at, processed_at, created_at, updated_at, attempts, max_attempts, next_attempt_at, processing_started_at, last_error_code, related_order_id, related_wallet_topup_id, payment_environment, event_source, transfer_direction, transfer_content, destination_account_identity, provider_account_identity, provider_account_mapping_id, business_fingerprint
 `
 
