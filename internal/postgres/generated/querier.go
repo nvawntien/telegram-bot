@@ -30,6 +30,7 @@ type Querier interface {
 	CountAdminProducts(ctx context.Context) (int64, error)
 	CountAvailableInventoryByProduct(ctx context.Context, productID int64) (int64, error)
 	CountClaimableInventoryForOrder(ctx context.Context, productID int64) (int64, error)
+	CountDeliveryJobsByStatus(ctx context.Context) ([]CountDeliveryJobsByStatusRow, error)
 	CountDeliveryReconciliationAnomalies(ctx context.Context, staleBefore pgtype.Timestamptz) (CountDeliveryReconciliationAnomaliesRow, error)
 	CountDeliveryReviewJobs(ctx context.Context) (int64, error)
 	CountExactReservedInventoryForOrder(ctx context.Context, orderID int64) (int32, error)

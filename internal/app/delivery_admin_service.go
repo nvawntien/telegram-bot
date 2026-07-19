@@ -66,6 +66,13 @@ type DeliveryAdminRepository interface {
 	RetryDelivery(context.Context, DeliveryResolutionCommand, time.Time) (DeliveryReviewItem, error)
 	CompleteDelivery(context.Context, DeliveryResolutionCommand, time.Time) (DeliveryReviewItem, error)
 	ReconcileDeliveryForAdmin(context.Context, int64, time.Time) (DeliveryReconciliation, error)
+	DeliveryQueueDepthForAdmin(context.Context, int64) (map[string]int64, error)
+}
+
+type DeliveryAdminMetrics interface {
+	ObserveDeliveryManualResolution(resolution, result string)
+	ObserveDeliveryReconciliation(anomaly string, count int64)
+	SetDeliveryQueueDepth(status string, count int64)
 }
 
 func (s *DeliveryAdminService) Reconcile(ctx context.Context, adminTelegramID int64) (DeliveryReconciliation, error) {
@@ -76,6 +83,22 @@ func (s *DeliveryAdminService) Reconcile(ctx context.Context, adminTelegramID in
 	if err != nil {
 		return DeliveryReconciliation{}, fmt.Errorf("reconcile delivery state: %w", err)
 	}
+	if s.metrics != nil {
+		for anomaly, count := range map[string]int64{
+			"delivering_without_job":             report.DeliveringWithoutJob,
+			"active_job_wrong_order_state":       report.ActiveJobWrongOrderState,
+			"completed_job_order_not_delivered":  report.CompletedJobOrderNotDelivered,
+			"delivered_inventory_mismatch":       report.DeliveredInventoryMismatch,
+			"sold_without_completed_job":         report.SoldWithoutCompletedJob,
+			"delivered_order_reserved_inventory": report.DeliveredOrderReservedInventory,
+			"multiple_active_jobs":               report.MultipleActiveJobs,
+			"stale_processing":                   report.StaleProcessing,
+			"ambiguous_without_review":           report.AmbiguousWithoutReview,
+			"success_evidence_not_completed":     report.SuccessEvidenceNotCompleted,
+		} {
+			s.metrics.ObserveDeliveryReconciliation(anomaly, count)
+		}
+	}
 	return report, nil
 }
 
@@ -83,7 +106,13 @@ type DeliveryAdminService struct {
 	repository      DeliveryAdminRepository
 	pageSize        int
 	processingLease time.Duration
+	metrics         DeliveryAdminMetrics
 	clock           func() time.Time
+}
+
+func (s *DeliveryAdminService) WithMetrics(metrics DeliveryAdminMetrics) *DeliveryAdminService {
+	s.metrics = metrics
+	return s
 }
 
 func NewDeliveryAdminService(repository DeliveryAdminRepository, pageSize int) *DeliveryAdminService {
@@ -107,6 +136,15 @@ func (s *DeliveryAdminService) List(ctx context.Context, adminTelegramID int64, 
 	items, total, err := s.repository.ListDeliveryReviews(ctx, adminTelegramID, int32(page*s.pageSize), int32(s.pageSize))
 	if err != nil {
 		return DeliveryReviewPage{}, fmt.Errorf("list delivery reviews: %w", err)
+	}
+	if s.metrics != nil {
+		depths, depthErr := s.repository.DeliveryQueueDepthForAdmin(ctx, adminTelegramID)
+		if depthErr != nil {
+			return DeliveryReviewPage{}, fmt.Errorf("measure delivery queue: %w", depthErr)
+		}
+		for _, status := range []string{"pending", "processing", "retryable_failed", "ambiguous", "manual_review", "permanent_failed", "completed", "cancelled"} {
+			s.metrics.SetDeliveryQueueDepth(status, depths[status])
+		}
 	}
 	return DeliveryReviewPage{Items: items, Page: pageInfo(page, s.pageSize, total)}, nil
 }
@@ -132,6 +170,13 @@ func (s *DeliveryAdminService) Retry(ctx context.Context, command DeliveryResolu
 		return DeliveryReviewItem{}, ErrInvalidInput
 	}
 	result, err := s.repository.RetryDelivery(ctx, command, s.clock())
+	if s.metrics != nil {
+		outcome := "success"
+		if err != nil {
+			outcome = "failed"
+		}
+		s.metrics.ObserveDeliveryManualResolution("retry", outcome)
+	}
 	if err != nil {
 		return DeliveryReviewItem{}, fmt.Errorf("retry delivery: %w", err)
 	}
@@ -145,6 +190,13 @@ func (s *DeliveryAdminService) Complete(ctx context.Context, command DeliveryRes
 		return DeliveryReviewItem{}, ErrInvalidInput
 	}
 	result, err := s.repository.CompleteDelivery(ctx, command, s.clock())
+	if s.metrics != nil {
+		outcome := "success"
+		if err != nil {
+			outcome = "failed"
+		}
+		s.metrics.ObserveDeliveryManualResolution("mark_delivered", outcome)
+	}
 	if err != nil {
 		return DeliveryReviewItem{}, fmt.Errorf("complete delivery: %w", err)
 	}

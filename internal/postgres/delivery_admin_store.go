@@ -79,6 +79,21 @@ func (s *AppStore) ReconcileDeliveryForAdmin(ctx context.Context, adminTelegramI
 	return s.ReconcileDeliveryState(ctx, staleBefore)
 }
 
+func (s *AppStore) DeliveryQueueDepthForAdmin(ctx context.Context, adminTelegramID int64) (map[string]int64, error) {
+	if _, err := authorizePaymentAdmin(ctx, s.queries, adminTelegramID); err != nil {
+		return nil, err
+	}
+	rows, err := s.queries.CountDeliveryJobsByStatus(ctx)
+	if err != nil {
+		return nil, err
+	}
+	depths := make(map[string]int64, len(rows))
+	for _, row := range rows {
+		depths[row.Status] = row.JobCount
+	}
+	return depths, nil
+}
+
 func (s *AppStore) RetryDelivery(ctx context.Context, command app.DeliveryResolutionCommand, resolvedAt time.Time) (app.DeliveryReviewItem, error) {
 	var result app.DeliveryReviewItem
 	err := s.transactor.WithinTransaction(ctx, func(ctx context.Context, queries *generated.Queries) error {

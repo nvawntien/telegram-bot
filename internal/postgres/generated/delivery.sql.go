@@ -147,6 +147,39 @@ func (q *Queries) ClaimDeliveryJobs(ctx context.Context, arg ClaimDeliveryJobsPa
 	return items, nil
 }
 
+const countDeliveryJobsByStatus = `-- name: CountDeliveryJobsByStatus :many
+SELECT status, count(*)::bigint AS job_count
+FROM outbox_events
+WHERE event_type = 'order.delivery_requested'
+GROUP BY status
+ORDER BY status
+`
+
+type CountDeliveryJobsByStatusRow struct {
+	Status   string `db:"status" json:"status"`
+	JobCount int64  `db:"job_count" json:"job_count"`
+}
+
+func (q *Queries) CountDeliveryJobsByStatus(ctx context.Context) ([]CountDeliveryJobsByStatusRow, error) {
+	rows, err := q.db.Query(ctx, countDeliveryJobsByStatus)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []CountDeliveryJobsByStatusRow{}
+	for rows.Next() {
+		var i CountDeliveryJobsByStatusRow
+		if err := rows.Scan(&i.Status, &i.JobCount); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const countDeliveryReconciliationAnomalies = `-- name: CountDeliveryReconciliationAnomalies :one
 SELECT
     (

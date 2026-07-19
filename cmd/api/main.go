@@ -57,6 +57,7 @@ func run(ctx context.Context) error {
 	telegramMetrics := observability.NewTelegramMetrics(prometheus.DefaultRegisterer)
 	paymentMetrics := observability.NewPaymentMetrics(prometheus.DefaultRegisterer)
 	walletMetrics := observability.NewWalletMetrics(prometheus.DefaultRegisterer)
+	deliveryMetrics := observability.NewDeliveryMetrics(prometheus.DefaultRegisterer)
 	store := postgres.NewAppStore(pool)
 	userService := app.NewUserService(store)
 	catalogService := app.NewCatalogService(store, app.DefaultPageSize)
@@ -103,7 +104,7 @@ func run(ctx context.Context) error {
 	paymentAdminService := app.NewPaymentAdminService(store, cfg.PaymentReviewPageSize, app.DefaultPostPaymentReservationTTL).
 		WithDeliveryMaxAttempts(cfg.DeliveryMaxAttempts)
 	deliveryAdminService := app.NewDeliveryAdminService(store, cfg.DeliveryReviewPageSize).
-		WithProcessingLease(cfg.DeliveryProcessingLease)
+		WithProcessingLease(cfg.DeliveryProcessingLease).WithMetrics(deliveryMetrics)
 	updateService := app.NewUpdateService(store, cfg.TelegramUpdateStaleAfter)
 	telegramClient, err := telegramadapter.NewClient(
 		cfg.TelegramBotToken, "", cfg.TelegramAPITimeout, 1<<20, telegramMetrics,

@@ -388,6 +388,13 @@ FROM outbox_events
 WHERE event_type = 'order.delivery_requested'
   AND status IN ('pending', 'processing', 'retryable_failed', 'ambiguous', 'manual_review', 'permanent_failed');
 
+-- name: CountDeliveryJobsByStatus :many
+SELECT status, count(*)::bigint AS job_count
+FROM outbox_events
+WHERE event_type = 'order.delivery_requested'
+GROUP BY status
+ORDER BY status;
+
 -- name: ListDeliveryReviewJobs :many
 SELECT
     job.id,
