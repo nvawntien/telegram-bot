@@ -22,17 +22,21 @@ type ManualPaymentCommand struct {
 }
 
 type PaymentReviewCase struct {
-	ID                  int64
-	Provider            string
-	MaskedTransactionID string
-	Reference           string
-	Amount              domain.Money
-	Currency            string
-	OccurredAt          time.Time
-	OrderID             int64
-	TopupID             int64
-	Reason              string
-	Status              string
+	ID                       int64
+	Provider                 string
+	Environment              string
+	Source                   string
+	MaskedTransactionID      string
+	MaskedDestinationAccount string
+	ProviderAccountMappingID int64
+	Reference                string
+	Amount                   domain.Money
+	Currency                 string
+	OccurredAt               time.Time
+	OrderID                  int64
+	TopupID                  int64
+	Reason                   string
+	Status                   string
 }
 
 type PaymentReviewPage struct {

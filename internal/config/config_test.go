@@ -105,6 +105,25 @@ func TestLoadWorkerRequiresDeliverySecrets(t *testing.T) {
 	}
 }
 
+func TestLoadWorkerUsesSharedPaymentReferenceConfiguration(t *testing.T) {
+	setValidEnvironment(t)
+	t.Setenv("PAYMENT_REFERENCE_PREFIX", "ORDER")
+	t.Setenv("PAYMENT_REFERENCE_RANDOM_BYTES", "8")
+
+	cfg, err := LoadWorker()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.PaymentReferencePrefix != "ORDER" || cfg.PaymentReferenceRandomBytes != 8 {
+		t.Fatalf("worker payment reference config = %q/%d", cfg.PaymentReferencePrefix, cfg.PaymentReferenceRandomBytes)
+	}
+
+	t.Setenv("PAYMENT_REFERENCE_PREFIX", "bad-prefix")
+	if _, err := LoadWorker(); err == nil || !strings.Contains(err.Error(), "payment reference") {
+		t.Fatalf("LoadWorker() error = %v, want payment reference validation", err)
+	}
+}
+
 func TestLoadValidatesDeliverySafetyBounds(t *testing.T) {
 	setValidEnvironment(t)
 	t.Setenv("DELIVERY_RETRY_BASE", "60")

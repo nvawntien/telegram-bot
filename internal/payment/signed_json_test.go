@@ -27,7 +27,7 @@ func TestSignedJSONVerifyAndNormalize(t *testing.T) {
 	if err != nil {
 		t.Fatalf("VerifyAndNormalize() error = %v", err)
 	}
-	if event.Provider != SignedJSONProvider || event.ExternalEventID != "event-1" || event.ProviderTransactionID != "transaction-1" || event.Reference != "TS-ABC123" || event.Amount != 125000 || event.Currency != "VND" {
+	if event.Provider != SignedJSONProvider || event.ExternalEventID != "event-1" || event.ProviderTransactionID != "transaction-1" || event.Reference != "TSABCDEF123456" || event.Amount != 125000 || event.Currency != "VND" {
 		t.Fatalf("normalized event = %+v", event)
 	}
 	if event.ReceivedAccount != "***6789" || len(event.PayloadHash) != sha256.Size || strings.Contains(string(event.SanitizedMetadata), "123456789") {
@@ -115,7 +115,7 @@ func TestSignedJSONTimestampBoundaryAndValidation(t *testing.T) {
 		t.Fatalf("boundary error = %v", err)
 	}
 
-	invalid := strings.Replace(string(validBody(now)), "TS-ABC123", " TS-ABC123 ", 1)
+	invalid := strings.Replace(string(validBody(now)), "TSABCDEF123456", " TSABCDEF123456 ", 1)
 	invalidBody := []byte(invalid)
 	if _, err := verifier.VerifyAndNormalize(context.Background(), signedHeaders(invalidBody, now), invalidBody); !errors.Is(err, app.ErrInvalidInput) {
 		t.Fatalf("whitespace reference error = %v", err)
@@ -133,7 +133,7 @@ func newTestVerifier(t *testing.T, now time.Time, tolerance time.Duration) *Sign
 }
 
 func validBody(timestamp time.Time) []byte {
-	return []byte(fmt.Sprintf(`{"event_id":"event-1","transaction_id":"transaction-1","event_type":"payment.received","reference":"TS-ABC123","direction":"inbound","transfer_content":"TS-ABC123","destination_account_identity":"reference-account-1","amount_vnd":125000,"currency":"VND","timestamp":%d,"occurred_at":"%s","received_account":"123456789","metadata":{"channel":"private-test"}}`, timestamp.Unix(), timestamp.Format(time.RFC3339)))
+	return []byte(fmt.Sprintf(`{"event_id":"event-1","transaction_id":"transaction-1","event_type":"payment.received","reference":"TSABCDEF123456","direction":"inbound","transfer_content":"TSABCDEF123456","destination_account_identity":"reference-account-1","amount_vnd":125000,"currency":"VND","timestamp":%d,"occurred_at":"%s","received_account":"123456789","metadata":{"channel":"private-test"}}`, timestamp.Unix(), timestamp.Format(time.RFC3339)))
 }
 
 func signedHeaders(body []byte, timestamp time.Time) http.Header {

@@ -268,6 +268,8 @@ func load(process processKind) (Config, error) {
 	assign(&problems, "PAYMENT_EVENT_MAX_ATTEMPTS", parsePositiveInt32(os.Getenv("PAYMENT_EVENT_MAX_ATTEMPTS"), cfg.PaymentEventMaxAttempts), &cfg.PaymentEventMaxAttempts)
 	assign(&problems, "PAYMENT_EVENT_RETRY_BASE", parsePositiveDuration(os.Getenv("PAYMENT_EVENT_RETRY_BASE"), time.Second, cfg.PaymentEventRetryBase), &cfg.PaymentEventRetryBase)
 	assign(&problems, "PAYMENT_STALE_PROCESSING_TIMEOUT", parsePositiveDuration(os.Getenv("PAYMENT_STALE_PROCESSING_TIMEOUT"), time.Second, cfg.PaymentStaleProcessingTimeout), &cfg.PaymentStaleProcessingTimeout)
+	assign(&problems, "PAYMENT_REFERENCE_RANDOM_BYTES", parsePositiveInt(os.Getenv("PAYMENT_REFERENCE_RANDOM_BYTES"), cfg.PaymentReferenceRandomBytes), &cfg.PaymentReferenceRandomBytes)
+	cfg.PaymentReferencePrefix = envOrDefault("PAYMENT_REFERENCE_PREFIX", cfg.PaymentReferencePrefix)
 	providerList := os.Getenv("PAYMENT_PROVIDERS")
 	if strings.TrimSpace(providerList) == "" {
 		providerList = os.Getenv("PAYMENT_ALLOWED_PROVIDERS")
@@ -293,10 +295,8 @@ func load(process processKind) (Config, error) {
 		assign(&problems, "PAYMENT_REVIEW_PAGE_SIZE", parsePositiveInt(os.Getenv("PAYMENT_REVIEW_PAGE_SIZE"), cfg.PaymentReviewPageSize), &cfg.PaymentReviewPageSize)
 		assign(&problems, "ORDER_EXPIRE_MINUTES", parsePositiveDuration(os.Getenv("ORDER_EXPIRE_MINUTES"), time.Minute, cfg.OrderExpiry), &cfg.OrderExpiry)
 		assign(&problems, "ORDER_MAX_QUANTITY", parsePositiveInt32(os.Getenv("ORDER_MAX_QUANTITY"), cfg.OrderMaxQuantity), &cfg.OrderMaxQuantity)
-		assign(&problems, "PAYMENT_REFERENCE_RANDOM_BYTES", parsePositiveInt(os.Getenv("PAYMENT_REFERENCE_RANDOM_BYTES"), cfg.PaymentReferenceRandomBytes), &cfg.PaymentReferenceRandomBytes)
 		assign(&problems, "ORDER_PAGE_SIZE", parsePositiveInt(os.Getenv("ORDER_PAGE_SIZE"), cfg.OrderPageSize), &cfg.OrderPageSize)
 		assign(&problems, "BANK_ACCOUNT_PAGE_SIZE", parsePositiveInt(os.Getenv("BANK_ACCOUNT_PAGE_SIZE"), cfg.BankAccountPageSize), &cfg.BankAccountPageSize)
-		cfg.PaymentReferencePrefix = envOrDefault("PAYMENT_REFERENCE_PREFIX", cfg.PaymentReferencePrefix)
 		cfg.VietQRBaseURL = envOrDefault("VIETQR_BASE_URL", cfg.VietQRBaseURL)
 		cfg.VietQRTemplate = envOrDefault("VIETQR_TEMPLATE", cfg.VietQRTemplate)
 		assign(&problems, "ADMIN_TELEGRAM_IDS", parseAdminIDs(os.Getenv("ADMIN_TELEGRAM_IDS")), &cfg.AdminTelegramIDs)
@@ -429,9 +429,6 @@ func validate(cfg Config, process processKind) []error {
 		if cfg.OrderMaxQuantity <= 0 || cfg.OrderMaxQuantity > 1000 {
 			problems = append(problems, errors.New("ORDER_MAX_QUANTITY must be between 1 and 1000"))
 		}
-		if cfg.PaymentReferenceRandomBytes < 4 || cfg.PaymentReferenceRandomBytes > 24 || !validReferencePrefix(cfg.PaymentReferencePrefix) {
-			problems = append(problems, errors.New("payment reference configuration is invalid"))
-		}
 		if cfg.OrderPageSize > 20 || cfg.BankAccountPageSize > 20 {
 			problems = append(problems, errors.New("order and bank page sizes must not exceed 20"))
 		}
@@ -452,6 +449,9 @@ func validate(cfg Config, process processKind) []error {
 	}
 	if cfg.PaymentProviderEnvironment != "development" && cfg.PaymentProviderEnvironment != "test" && cfg.PaymentProviderEnvironment != "production" {
 		problems = append(problems, errors.New("PAYMENT_PROVIDER_ENVIRONMENT must be development, test, or production"))
+	}
+	if cfg.PaymentReferenceRandomBytes < 4 || cfg.PaymentReferenceRandomBytes > 24 || !validReferencePrefix(cfg.PaymentReferencePrefix) {
+		problems = append(problems, errors.New("payment reference configuration is invalid"))
 	}
 	if cfg.PaymentPrimaryProvider != "" && !containsString(cfg.PaymentProviders, cfg.PaymentPrimaryProvider) {
 		problems = append(problems, errors.New("PAYMENT_PRIMARY_PROVIDER must be present in PAYMENT_PROVIDERS"))

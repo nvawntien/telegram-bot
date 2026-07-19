@@ -151,7 +151,9 @@ func (j *ReconciliationJob) reconcileAccount(ctx context.Context, provider Trans
 	}
 	defer func() {
 		if returnedErr != nil {
-			_ = j.checkpoints.FailProviderCheckpoint(context.WithoutCancel(ctx), checkpoint, reconciliationErrorCode(returnedErr))
+			failureCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), j.requestTimeout)
+			defer cancel()
+			_ = j.checkpoints.FailProviderCheckpoint(failureCtx, checkpoint, reconciliationErrorCode(returnedErr))
 		}
 	}()
 

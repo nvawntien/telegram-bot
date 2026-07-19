@@ -321,7 +321,11 @@ func PaymentReviewsView(page app.PaymentReviewPage) (string, Keyboard) {
 	lines := []string{"<b>Payment review queue</b>"}
 	rows := Keyboard{}
 	for _, item := range page.Items {
-		lines = append(lines, fmt.Sprintf("#%d · %s · %s ₫ · %s · ref <code>%s</code> · tx %s", item.ID, Escape(item.Reason), formatVND(item.Amount.Int64()), Escape(item.Currency), Escape(item.Reference), Escape(item.MaskedTransactionID)))
+		mapping := "unmapped"
+		if item.ProviderAccountMappingID > 0 {
+			mapping = fmt.Sprintf("mapping #%d", item.ProviderAccountMappingID)
+		}
+		lines = append(lines, fmt.Sprintf("#%d · %s · %s/%s/%s · %s ₫ · %s · ref <code>%s</code> · tx %s · account %s · %s", item.ID, Escape(item.Reason), Escape(item.Provider), Escape(item.Environment), Escape(item.Source), formatVND(item.Amount.Int64()), Escape(item.Currency), Escape(item.Reference), Escape(item.MaskedTransactionID), Escape(item.MaskedDestinationAccount), mapping))
 		rows = append(rows, []Button{{Text: fmt.Sprintf("Resolve #%d", item.ID), Data: fmt.Sprintf("v1:a:rr:%d", item.ID)}})
 	}
 	if len(page.Items) == 0 {

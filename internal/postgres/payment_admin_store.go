@@ -109,7 +109,15 @@ func authorizePaymentAdmin(ctx context.Context, queries *generated.Queries, tele
 }
 
 func mapPaymentReview(row generated.PaymentReviewCase) app.PaymentReviewCase {
-	return app.PaymentReviewCase{ID: row.ID, Provider: row.Provider, MaskedTransactionID: maskTransactionID(row.ProviderTransactionID.String), Reference: row.PaymentReference, Amount: domain.Money(row.AmountVnd), Currency: row.Currency, OccurredAt: row.OccurredAt.Time, OrderID: row.OrderID.Int64, TopupID: row.WalletTopupID.Int64, Reason: row.Reason, Status: row.Status}
+	return app.PaymentReviewCase{
+		ID: row.ID, Provider: row.Provider, Environment: row.PaymentEnvironment,
+		Source: row.EventSource, MaskedTransactionID: maskTransactionID(row.ProviderTransactionID.String),
+		MaskedDestinationAccount: maskTransactionID(row.DestinationAccountIdentity.String),
+		ProviderAccountMappingID: row.ProviderAccountMappingID.Int64,
+		Reference:                row.PaymentReference, Amount: domain.Money(row.AmountVnd), Currency: row.Currency,
+		OccurredAt: row.OccurredAt.Time, OrderID: row.OrderID.Int64, TopupID: row.WalletTopupID.Int64,
+		Reason: row.Reason, Status: row.Status,
+	}
 }
 
 func maskTransactionID(value string) string {
