@@ -73,15 +73,17 @@ provider adapter and banking refund execution remain explicitly unimplemented.
 Exit: ten duplicate webhooks create one payment effect; wallet cannot go
 negative; every balance change has one idempotent ledger entry.
 
-### Phase 7 — outbox and delivery
+### Phase 7 — outbox and delivery (implemented)
 
 1. Outbox claim/lease/retry runner and exponential backoff.
 2. Telegram delivery adapter and post-send completion transaction.
 3. Durable manual fallback, exhausted retry, and admin notification.
 4. Multi-worker and crash-after-payment integration tests.
 
-Exit: crash after payment commit still delivers; Telegram transient failure
-retries; no order is delivered before send; two workers cannot claim one event.
+Exit achieved: one durable job is created with payment acceptance; Phase 6 rows
+backfill idempotently; retries are bounded; ambiguous outcomes never auto-retry;
+confirmed success alone sells exact inventory and marks delivered; 100 workers
+claim one job once; crash boundaries and plaintext leakage are tested.
 
 ### Phase 8 — operations
 
@@ -102,7 +104,7 @@ Exit: remaining Definition of Done checks and restore drill pass.
 | `SKIP LOCKED` code looks correct but fails under real contention | Oversell | PostgreSQL integration tests with 100 goroutines and multiple concurrent orders; partial unique active-mapping constraint |
 | Late payment races expiry | Wrong delivery/refund | Same order row lock, state recheck, explicit `payment_review`, deterministic operator flow |
 | Outbox worker dies while processing | Stuck fulfilment | Leases, expired-lease reclamation, max attempts, bounded backoff, multi-worker test |
-| Telegram send succeeds but response is lost | Possible duplicate credential message | Persist attempt marker, reconcile ambiguous failures conservatively, admin review after bounded retry; do not expose item to another buyer |
+| Telegram send succeeds but response is lost | Possible duplicate credential message | Persist sending marker/evidence, move to ambiguous, never auto-retry, require audited verification; do not expose item to another buyer |
 | Wallet cached balance drifts from ledger | Financial inconsistency | Same locked transaction, balance-after ledger value, periodic reconciliation query, immutable entries |
 | Sheet is treated as stock authority | Selling undeliverable items | Catalog import separated from encrypted inventory import; real available rows are authoritative |
 | Admin callback/session replay | Unauthorized mutation | Active RBAC lookup, durable versioned session, expiry, ownership/resource/state validation, audit/request ID |

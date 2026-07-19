@@ -49,7 +49,7 @@ jobs:
           git diff --exit-code -- internal/postgres/generated
       - name: Validate Docker Compose configuration
         run: docker compose config --quiet
-      - name: Phase 6 migration cycle
+      - name: Phase 7 migration cycle
         run: go test -tags=integration -count=1 ./tests/integration -run '^TestMigrationCycle$'
       - name: Phase 5 idempotency ownership and expiry
         run: go test -tags=integration -count=1 ./tests/integration -run '^TestPhase5'
@@ -57,5 +57,9 @@ jobs:
         run: go test -count=1 ./internal/payment ./internal/httpapi
       - name: Phase 6 financial invariants and concurrency
         run: go test -tags=integration -count=1 -timeout=5m ./tests/integration -run '^TestPhase6'
+      - name: Phase 7 delivery ambiguity crash leakage and concurrency
+        run: go test -tags=integration -count=1 -timeout=10m ./tests/integration -run '^TestPhase7'
+      - name: Telegram delivery adapter failure classification
+        run: go test -count=1 ./internal/telegram -run 'Delivery'
       - name: PostgreSQL integration, security, and concurrency tests
         run: make test-integration

@@ -6,7 +6,7 @@ as a Go modular monolith. The reference repository defines the Telegram product
 experience; this repository redesigns persistence, transactions, concurrency,
 idempotency, auditability, and recovery around PostgreSQL.
 
-Current status: **Phase 6 payment acceptance and wallet complete**. The API
+Current status: **Phase 7 transactional Telegram delivery complete**. The API
 accepts secret-verified Telegram webhooks through Gin, durably deduplicates
 updates, serves the active catalog, and provides PostgreSQL-backed, audited
 category/product and redacted inventory administration. Authenticated
@@ -15,16 +15,20 @@ reservation recovery, atomic pending-order creation, ownership-safe history and
 cancellation, encrypted bank administration, VietQR instructions, and the
 order-expiry worker are implemented. Phase 6 adds signed durable payment-event
 ingestion, exact reconciliation, manual confirmation, atomic post-payment
-inventory claims, review cases, wallet top-ups, and wallet order payment.
-Delivery, bank-refund execution, broadcast, and Google Sheet workflows remain disabled.
+inventory claims, review cases, wallet top-ups, and wallet order payment. Phase
+7 adds a durable delivery outbox, boundary-only inventory decryption, Telegram
+delivery, bounded retry/backoff, conservative ambiguous-send recovery, and
+audited admin resolution. Bank-refund execution, broadcast, and Google Sheet
+workflows remain disabled.
 
 ## Architecture
 
 The deployable image contains three commands:
 
 - `api`: Gin HTTP server for health, metrics, and the Telegram webhook.
-- `worker`: cancellable background runner with pending-order expiry and durable
-  payment-event jobs; delivery, broadcast, and Sheet jobs are added later.
+- `worker`: cancellable background runner with pending-order expiry, durable
+  payment-event jobs, and durable Telegram delivery jobs. Broadcast and Sheet
+  jobs are not implemented.
 - `migrate`: goose migration runner.
 
 ```text
@@ -39,6 +43,7 @@ Payment callbacks follow a separate durable boundary:
 ```text
 POST /webhooks/payments/:provider -> verify raw-body signature -> payment_events
 payment worker -> shared acceptance core -> payment/order/wallet/inventory transaction
+delivery worker -> claim lease -> decrypt in memory -> Telegram -> finalize transaction
 ```
 
 External APIs are never called inside a database transaction. See the
@@ -197,12 +202,18 @@ create, edit, activate, or deactivate encrypted account numbers. Catalog,
 inventory, and bank mutations commit safe audit metadata, session completion,
 and update completion atomically. Phase 6 admin menus also list redacted payment
 reviews, accept a manual payment only with a mandatory transaction ID, resolve
-reviews without network refund, and apply audited wallet adjustments.
+reviews without network refund, and apply audited wallet adjustments. The
+delivery menu lists pending, processing, retryable, permanent, and ambiguous
+jobs with redacted attempt evidence and reconciliation counts. Ambiguous sends
+never retry automatically. Retry or mark-delivered resolution requires an
+active PostgreSQL admin, a durable versioned session, mandatory reason/evidence,
+and explicit confirmation; Telegram is still called only by the worker.
 
 Banned/disabled users are denied. Unknown commands get a short menu hint.
 VietQR output is only a transfer instruction. Opening the QR does not confirm a
-payment. Accepted payment reserves exact inventory and stops at `reserving`;
-Phase 6 never decrypts or delivers inventory. There is no `/checkpay`, banking
+payment. Accepted payment reserves exact inventory and creates one delivery job
+in the same transaction. `/orders` shows customer-friendly delivery state but
+never reveals credentials or offers customer redelivery. There is no `/checkpay`, banking
 refund API, or automatic compatibility with a real bank provider.
 
 ## HTTP endpoints
@@ -252,11 +263,16 @@ Order creation controls include `ORDER_EXPIRE_MINUTES`, `ORDER_MAX_QUANTITY`,
 `BANK_ACCOUNT_PAGE_SIZE`. Other API controls include `TELEGRAM_WEBHOOK_BODY_LIMIT_BYTES`,
 `TELEGRAM_WEBHOOK_TIMEOUT_SECONDS`, `TELEGRAM_UPDATE_STALE_SECONDS`,
 `ADMIN_SESSION_TTL_MINUTES`, `TELEGRAM_API_TIMEOUT_SECONDS`, and
-`SUPPORT_CONTACT`. Operational variables and defaults are documented in
-`.env.example`. The worker uses `ORDER_EXPIRY_INTERVAL`,
-`ORDER_EXPIRY_BATCH_SIZE`, and `ORDER_EXPIRY_RUN_TIMEOUT`; its separate loader
-does not require Telegram tokens, admin IDs, HTTP/webhook settings, VietQR, or
-encryption keys. The migration process requires only `DATABASE_URL` and an optional
+`SUPPORT_CONTACT`. Delivery controls are `DELIVERY_BATCH_SIZE`,
+`DELIVERY_POLL_INTERVAL`, `DELIVERY_RUN_TIMEOUT`, `DELIVERY_JOB_TIMEOUT`,
+`DELIVERY_PROCESSING_LEASE`, `DELIVERY_MAX_ATTEMPTS`, `DELIVERY_RETRY_BASE`,
+`DELIVERY_RETRY_MAX`, `DELIVERY_RETRY_JITTER`,
+`DELIVERY_STALE_SCAN_INTERVAL`, `DELIVERY_MESSAGE_MAX_BYTES`, and
+`DELIVERY_REVIEW_PAGE_SIZE`. Operational variables and defaults are documented
+in `.env.example`. Run `go run ./cmd/worker` continuously after migrations. The
+worker requires `TELEGRAM_BOT_TOKEN` and the inventory key because it performs
+delivery; it does not require webhook/admin/VietQR or bank-account secrets. The
+migration process requires only `DATABASE_URL` and an optional
 `MIGRATIONS_DIR`.
 
 Payment settings are `PAYMENT_ALLOWED_PROVIDERS`, `PAYMENT_WEBHOOK_BODY_LIMIT`,
@@ -289,6 +305,10 @@ without the matching key cannot recover inventory.
 - [Payment ingestion and acceptance](docs/design/payment-ingestion.md)
 - [Wallet ledger](docs/design/wallet-ledger.md)
 - [Payment reconciliation](docs/design/payment-reconciliation.md)
+- [Delivery outbox](docs/design/delivery-outbox.md)
+- [Delivery state machine](docs/design/delivery-state-machine.md)
+- [Ambiguous Telegram delivery](docs/design/ambiguous-telegram-delivery.md)
+- [Manual delivery recovery](docs/design/manual-delivery-recovery.md)
 - [Roadmap and risks](docs/design/roadmap-and-risks.md)
 - [Inventory encryption](docs/design/inventory-encryption.md)
 - [Inventory administration security](docs/design/inventory-admin-security.md)
@@ -302,6 +322,7 @@ without the matching key cannot recover inventory.
 - [Phase 4 completion report](docs/phase-4-report.md)
 - [Phase 5 completion report](docs/phase-5-report.md)
 - [Phase 6 completion report](docs/phase-6-report.md)
+- [Phase 7 completion report](docs/phase-7-report.md)
 
 ## Repository layout
 
@@ -328,18 +349,19 @@ created when they gain working behaviour, not as empty skeletons.
 
 ## Current limitations
 
-- Telegram confirmation delivery has no outbox yet. If sending after a
-  successful commit fails, the database operation stays committed and the error
-  is logged/measured; a duplicate update does not resend it.
+- Delivery uses one bounded Telegram message. Oversized opaque inventory fails
+  before send and enters review; it is never truncated or partially sent.
+- Ambiguous transport outcomes require operator verification. There is no
+  automatic Telegram history lookup and no blind resend.
+- There is no inventory plaintext export or credential reveal through order or
+  admin views. A lost customer message requires controlled support recovery.
 - Pending orders check current authenticated available inventory but do not
   reserve it. Multiple pending orders may observe the same stock; accepted
   payment later performs an exact atomic claim.
 - The included signed payment adapter is a private/test contract, not an
   integration with a production payment provider.
-- Review resolution does not call a bank refund API, and no automatic delivery
-  or delivery outbox is implemented.
-- Automatic reservation sweeping is deferred because no payment/delivery
-  recovery flow can safely resolve sensitive order states yet.
-- The worker expires overdue pending orders without notifying Telegram.
-  Durable notification/outbox and external delivery begin in later phases.
+- Review resolution does not call a bank refund API.
+- Automatic reservation sweeping remains conservative: ambiguous, delivering,
+  and delivery-failed reservations are held for explicit recovery.
+- Broadcast delivery and Google Sheet Sync are not implemented.
 - Compose values are suitable only for local development.

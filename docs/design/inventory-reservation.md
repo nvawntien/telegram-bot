@@ -48,7 +48,16 @@ order/status. This also covers a process crash after a committed claim and
 before a later payment/delivery step: the mapping remains durable and recovery
 can inspect it without risking resale.
 
-An automatic sweeper is deliberately deferred. Phase 4 has no payment or
-delivery workflow that can resolve a sensitive expired reservation, so a timer
-that released solely on age would be unsafe. A later sweeper may batch/lock
-candidate orders only after explicit operator/refund transitions are defined.
+An automatic release sweeper remains deliberately deferred. Phase 7 can now
+classify delivery state, but age alone still cannot prove that an ambiguous or
+failed delivery is safe to resell. A future operator/refund workflow may
+batch-lock candidates only after an explicit safe terminal transition.
+
+## Delivery ownership
+
+Phase 7 retains the active mapping while delivery is pending, processing,
+retryable, ambiguous, in review, or permanently failed. Decryption does not
+change ownership. Only confirmed Telegram success, or audited manual completion
+with message evidence, changes the exact reserved set to `sold` and records its
+order. Ambiguous/manual retry never releases or reassigns rows. A count mismatch
+aborts finalization and leaves the set reserved for reconciliation.

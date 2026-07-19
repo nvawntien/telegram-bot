@@ -1,6 +1,6 @@
 # Implemented PostgreSQL schema
 
-The implemented schema spans goose migrations `00001` through `00017`.
+The implemented schema spans goose migrations `00001` through `00018`.
 Business rows use `bigint GENERATED ALWAYS AS IDENTITY`; Telegram identifiers
 remain external `bigint` values. This keeps joins and queue indexes compact while
 supporting Telegram's signed 64-bit identifier range.
@@ -44,6 +44,7 @@ supporting Telegram's signed 64-bit identifier range.
 | `00015_encrypted_inventory` | AES-GCM envelope metadata and reservation history |
 | `00016_orders_banks_vietqr` | encrypted bank envelope metadata and immutable order bank snapshots |
 | `00017_payments_wallet_phase6` | durable payment processing, allocations, reviews, and wallet top-up intents |
+| `00018_transactional_delivery_phase7` | delivery leases, ambiguity/manual state, Telegram evidence, append-only attempts, and review indexes |
 
 Each file has a dependency-safe `Down` section. Integration tests prove the
 full `up -> down-to-zero -> up` cycle in an isolated schema.
@@ -154,12 +155,17 @@ bank instruction snapshot. No ledger credit exists before exact payment acceptan
 
 ## Durable work and operations
 
-`outbox_events` constrains pending/processing/completed/failed state, attempts,
-worker lock ownership, and completion timestamps. Partial due-work and lease
-indexes support multiple workers. The claim query uses `FOR UPDATE SKIP LOCKED`;
-completion verifies the worker ID before changing the row.
+`outbox_events` is the single delivery queue. `order.delivery_requested` rows
+reference their order and recipient, constrain pending/processing/retryable/
+ambiguous/manual/permanent/completed state, attempts, next run, claimed versus
+sending stage, worker lease, Telegram evidence, manual resolution actor/reason/
+time, and optimistic version. Global deduplication plus the partial active-order
+unique index prevent competing jobs. Claiming uses stable `FOR UPDATE SKIP
+LOCKED`; ambiguous and terminal jobs are never eligible.
 
-`delivery_attempts` preserves ordered, unique attempts per order. `broadcasts`
+`delivery_attempts` is append-only and preserves started/succeeded/retryable/
+ambiguous/permanent/manual events with safe protocol evidence and sanitized
+errors. It never stores the outbound message or inventory material. `broadcasts`
 and `broadcast_recipients` constrain lifecycle/counters and provide claim
 indexes. Recipient primary keys make expansion idempotent.
 

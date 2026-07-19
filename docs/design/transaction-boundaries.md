@@ -54,8 +54,8 @@ audit row, avoiding repeated audit noise; runtime authorization always reads
 `users` and `admins` from PostgreSQL.
 
 Inventory sections are implemented in Phase 4. Ordering is Phase 5. Payment and
-wallet boundaries below are implemented in Phase 6. Delivery consumption,
-broadcast, and Sheet sections remain later-phase targets.
+wallet boundaries below are implemented in Phase 6. Delivery is implemented in
+Phase 7. Broadcast and Sheet sections remain later-phase targets.
 
 ## Create order
 
@@ -92,11 +92,28 @@ One serializable-by-locking transaction:
 6. The exact-set SQL updates zero rows when the count is short. Preserve the
    confirmed external payment, move the order to `out_of_stock`, create a review
    case, and mark the event review in this same transaction.
-7. On success, insert the unique payment allocation and stop at `reserving`.
+7. On success, insert the unique payment allocation, verify the exact reserved
+   mapping, create one delivery job, and transition to `delivering`.
 8. Mark the event completed and commit.
 
-The normal path commits no external side effect. Delivery/outbox creation is
-intentionally deferred to Phase 7.
+The normal path commits no external side effect. Job creation and the order
+transition are atomic with acceptance; inventory is not decrypted.
+
+## Telegram delivery
+
+The worker claims due rows in a short committed transaction, then loads and
+revalidates the reserved mapping, decrypts temporary byte slices, builds one
+bounded escaped message, persists `sending`, and calls Telegram without a
+database transaction. Confirmed success starts a new transaction that locks
+job/order/inventory, sells the exact quantity, marks order delivered, completes
+the job with message evidence, and appends attempt/history/audit.
+
+Retryable, permanent, and ambiguous outcomes use separate finalizer
+transactions. A stale `sending` lease is ambiguous. If Telegram succeeds but
+finalization fails, a new best-effort transaction preserves evidence and
+ambiguity. Manual actions reauthorize admin/session/job versions and commit
+resolution, audit, session, and update receipt atomically; they never decrypt or
+call Telegram.
 
 ## Wallet payment/top-up
 
@@ -108,7 +125,12 @@ short claim rolls back the entire transaction. Debit, payment/allocation,
 history, mappings, and Telegram receipt then commit together. Provider top-up
 payment, allocation, cached credit, ledger row, and intent status commit together.
 
-## Outbox claim and external call
+## Generic outbox foundation
+
+The original generic claim flow remains available for non-delivery events. A
+delivery event does not use its blanket expired-`processing` reclaim rule:
+Phase 7 applies the stage-aware policy in **Telegram delivery** above so a stale
+`sending` job becomes ambiguous instead of being sent again.
 
 Claim transaction:
 
@@ -125,15 +147,17 @@ admin notification intent.
 
 ## Delivery success/failure
 
-Telegram call occurs outside a transaction with an idempotency marker derived
-from order/event. After success, one transaction locks order/event/items,
+Telegram delivery calls occur outside a transaction after persisting the
+attempt's `sending` stage. After confirmed success, one transaction locks order/event/items,
 inserts a succeeded delivery attempt, changes mapped inventory to sold, changes
 order to delivered, appends history, and completes outbox. Re-entry sees the
 completed/delivered state and does not resend.
 
 On retryable failure, a transaction inserts the attempt and reschedules outbox.
 On exhaustion, it also transitions the order to `delivery_failed` and enqueues
-an admin notification. Inventory mapping is retained.
+an admin notification. Inventory mapping is retained. Uncertain network results,
+stale `sending`, and confirmed-send database finalization failures are never
+automatically rescheduled; they enter ambiguous/manual review instead.
 
 ## Order expiry
 

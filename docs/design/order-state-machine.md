@@ -49,9 +49,11 @@ delivered --> refunded           (explicit exceptional compensation only)
 ```
 
 `paid` and `reserving` remain explicit for audit and recovery reasoning even
-when a normal confirmation transaction records both transitions and commits in
-`reserving`. `delivering` remains Phase 7-only because it requires a delivery
-outbox row. No other transition is allowed.
+when a normal confirmation transaction records both transitions. Phase 7 now
+creates the delivery job and applies `reserving -> delivering` in that same
+acceptance transaction. Worker success applies `delivering -> delivered`;
+terminal failure applies `delivering -> delivery_failed`; verified manual retry
+may restore `delivery_failed -> delivering`. No other transition is allowed.
 
 ## Guards
 
@@ -67,6 +69,8 @@ outbox row. No other transition is allowed.
   `order.delivery_requested` outbox row.
 - `delivered` requires evidence of a successful Telegram send. The transition,
   inventory sale, delivery attempt, and outbox completion commit together.
+- Ambiguous delivery leaves the order `delivering`; the delivery job and
+  customer label express review without inventing a duplicate order state.
 - `refunded` requires a confirmed provider refund or wallet credit ledger entry;
   an operator button alone cannot assert completion.
 - Repeated calls with the same idempotency key return the existing result and do
