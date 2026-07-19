@@ -1,6 +1,6 @@
 # Implemented PostgreSQL schema
 
-The implemented schema spans goose migrations `00001` through `00015`.
+The implemented schema spans goose migrations `00001` through `00016`.
 Business rows use `bigint GENERATED ALWAYS AS IDENTITY`; Telegram identifiers
 remain external `bigint` values. This keeps joins and queue indexes compact while
 supporting Telegram's signed 64-bit identifier range.
@@ -42,6 +42,7 @@ supporting Telegram's signed 64-bit identifier range.
 | `00013_shop_settings` | singleton `shop_settings` |
 | `00014_telegram_phase3` | durable Telegram receipts and audit correlation |
 | `00015_encrypted_inventory` | AES-GCM envelope metadata and reservation history |
+| `00016_orders_banks_vietqr` | encrypted bank envelope metadata and immutable order bank snapshots |
 
 Each file has a dependency-safe `Down` section. Integration tests prove the
 full `up -> down-to-zero -> up` cycle in an isolated schema.
@@ -93,7 +94,11 @@ order; `(order_id,status,inventory_item_id)` supports release/history queries.
 
 `orders` belongs to a user and constrains currency to VND. It stores subtotal,
 total, unique payment reference, per-user idempotency key, expiry and lifecycle
-timestamps, plus an optimistic `version`. Status is one of:
+timestamps, selected restricted bank-account ID, immutable encrypted bank
+instruction snapshots, and an optimistic `version`. A Phase 5 order bank
+snapshot is either wholly absent for legacy rows or a complete AES-GCM envelope
+with BIN/name/display/account-name/last-four metadata. Editing a bank account
+cannot change an existing order instruction. Status is one of:
 
 ```text
 pending_payment payment_review paid reserving delivering delivered expired
@@ -107,7 +112,14 @@ the same constrained status vocabulary.
 
 Indexes match ownership history, status operations, and pending-order expiry:
 `(user_id, created_at desc, id desc)`, `(status, created_at, id)`, and a partial
-`(expires_at, id)` pending index.
+`(expires_at, id)` pending index. `bank_account_id` is indexed for administrative
+history and uses `ON DELETE RESTRICT`.
+
+`bank_accounts` stores safe display metadata plus AES-256-GCM ciphertext, nonce,
+format, positive key version, operational key ID, keyed 32-byte fingerprint,
+last four digits, active flag, sort order, and optimistic version. Account
+numbers are never stored in plaintext or audit JSON. Active customer options
+return redacted metadata only.
 
 ## Payments and wallet
 
@@ -145,9 +157,9 @@ with an optional restricted foreign key to the default bank account.
 
 ## Encryption boundary
 
-The schema stores only encrypted inventory data, nonce, versioned format/key
-metadata, and fixed-size fingerprints. AES-GCM envelope creation and HMAC
-fingerprinting happen in the application adapter, not SQL. PostgreSQL never
-stores the master key. Audit/session/receipt rows retain IDs, versions, states,
-counts, and correlation only. Rotation execution remains a later operational
-feature.
+The schema stores only encrypted inventory and bank-account data, nonce,
+versioned format/key metadata, and fixed-size fingerprints. The two adapters
+derive purpose-separated encryption/fingerprint keys from separately configured
+master keys. PostgreSQL never stores either master key. Audit/session/receipt
+rows retain redacted metadata, IDs, versions, states, counts, and correlation
+only. Rotation execution remains a later operational feature.

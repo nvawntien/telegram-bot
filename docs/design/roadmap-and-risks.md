@@ -48,15 +48,17 @@ sensitive expired reservations are held for recovery; observable persistence,
 logs, metrics, callbacks, and Telegram responses contain no plaintext; exactly
 one of 100 concurrent claimants wins the last item.
 
-### Phase 5 — orders and VietQR
+### Phase 5 — orders and VietQR (implemented)
 
 1. Implement guarded order state machine and idempotent create/cancel/history.
 2. Add expiry worker and late-event seam.
 3. Add bank selection and VietQR instruction adapter.
 4. Preserve quantity/QR/check-payment customer flow with ownership checks.
 
-Exit: duplicate callback creates one order; User A cannot read/cancel User B;
-expired orders cannot auto-deliver.
+Exit achieved: ten concurrent duplicate creates produce one order/item/reference;
+ownership is guarded in PostgreSQL for list/view/cancel; bank and product
+snapshots remain stable; expiry is multi-worker safe; pending orders do not
+reserve inventory; VietQR never implies payment acceptance.
 
 ### Phase 6 — payments and wallet
 

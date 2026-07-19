@@ -5,6 +5,12 @@ HTTP handlers, workers, and repositories request a use case; none writes a
 status directly. Every successful transition appends `order_status_history` in
 the same transaction.
 
+Phase 5 creates only `pending_payment` and exposes only
+`pending_payment -> cancelled` to a customer. The expiry service alone applies
+`pending_payment -> expired`. `cancelled` and `expired` are terminal for the
+Phase 5 customer flow; the documented `expired -> payment_review` seam is for
+late-payment reconciliation in Phase 6 and is not callable by a customer.
+
 ## States
 
 | State | Meaning |
@@ -51,7 +57,7 @@ when a normal confirmation transaction records both transitions and commits in
 - Customer cancellation requires `orders.user_id` to match the authenticated
   Telegram user and current state `pending_payment`.
 - Admin transitions require active admin role/permission and an audit record.
-- Payment confirmation locks the order and rejects amount/reference mismatch,
+- Future payment confirmation locks the order and rejects amount/reference mismatch,
   reused provider transaction IDs, duplicate events, expired instructions, and
   invalid current state.
 - Inventory claim must return exactly the sum of order-item quantities. Partial
@@ -68,10 +74,10 @@ when a normal confirmation transaction records both transitions and commits in
 ## Inventory relationship
 
 - Order creation only checks indicative availability; it does not reserve.
-- Valid payment confirmation claims with `FOR UPDATE SKIP LOCKED`.
+- Phase 5 never claims or creates an active order-inventory mapping.
+- Future valid payment acceptance claims with `FOR UPDATE SKIP LOCKED`.
 - A reserved item cannot belong to two orders because the row status/reference
   constraint and unique mapping are enforced in PostgreSQL.
 - Delivery failure retains the reservation/mapping. An explicit refund or admin
   recovery use case decides whether to release it; a timer never silently puts
   exposed credentials back into available stock.
-

@@ -6,21 +6,24 @@ as a Go modular monolith. The reference repository defines the Telegram product
 experience; this repository redesigns persistence, transactions, concurrency,
 idempotency, auditability, and recovery around PostgreSQL.
 
-Current status: **Phase 4 encrypted inventory complete**. The API
+Current status: **Phase 5 ordering and VietQR instructions complete**. The API
 accepts secret-verified Telegram webhooks through Gin, durably deduplicates
 updates, serves the active catalog, and provides PostgreSQL-backed, audited
 category/product and redacted inventory administration. Authenticated
 application-layer encryption, atomic inventory claim/release, and conservative
-reservation recovery are implemented. Customer order, payment, delivery,
-broadcast, and Google Sheet workflows intentionally remain disabled.
+reservation recovery, atomic pending-order creation, ownership-safe history and
+cancellation, encrypted bank administration, VietQR instructions, and the
+order-expiry worker are implemented. Payment acceptance, inventory reservation
+after payment, delivery, refund, broadcast, and Google Sheet workflows remain
+disabled.
 
 ## Architecture
 
 The deployable image contains three commands:
 
 - `api`: Gin HTTP server for health, metrics, and the Telegram webhook.
-- `worker`: cancellable background runner; outbox, delivery, expiry, broadcast,
-  and Sheet jobs are added behind it.
+- `worker`: cancellable background runner with the Phase 5 pending-order expiry
+  job; outbox, delivery, broadcast, and Sheet jobs are added later.
 - `migrate`: goose migration runner.
 
 ```text
@@ -160,7 +163,12 @@ Customer commands:
 
 - `/start` and `/menu`: register/update the Telegram user and show the menu.
 - `/products`: browse active categories, active products, and product details
-  with bounded inline-keyboard pagination and back navigation.
+  with bounded inline-keyboard pagination and back navigation. Product detail
+  offers preset quantities, active bank selection, confirmation, and atomic
+  pending-order creation.
+- `/orders`: list only the caller's orders with deterministic pagination.
+- `/order <id>`: open an ownership-scoped order detail. Inline buttons expose
+  the same detail and allow an unexpired pending order to be cancelled.
 - `/support`: show the validated `SUPPORT_CONTACT` value.
 - `/myid`: show the caller's Telegram ID, never an internal database ID.
 
@@ -171,12 +179,16 @@ The inventory menu shows per-product status counts, paginates redacted item
 metadata, imports one opaque item per line, disables available items, and
 re-enables disabled items. It never reveals or exports inventory plaintext,
 ciphertext, nonce, or fingerprint. Cancel buttons close the persisted session.
-Catalog and inventory mutations, safe audit metadata, session completion, and
-update completion commit atomically.
+The bank-account menu lists redacted accounts and uses durable sessions to
+create, edit, activate, or deactivate encrypted account numbers. Catalog,
+inventory, and bank mutations commit safe audit metadata, session completion,
+and update completion atomically.
 
 Banned/disabled users are denied. Unknown commands get a short menu hint.
-There are deliberately no `/orders`, `/checkpay`, `/nap`, or `/buy` flows in
-Phase 4, and encrypted items are not delivered to customers yet.
+VietQR output is only a transfer instruction. Opening the QR does not confirm a
+payment, change the order to paid, reserve inventory, or deliver a secret.
+There are deliberately no `/checkpay`, payment-confirmation, wallet, top-up, or
+delivery flows in Phase 5.
 
 ## HTTP endpoints
 
@@ -204,6 +216,8 @@ dependency. API configuration requires:
 - `INVENTORY_ENCRYPTION_KEY` (exactly 32 bytes after standard-base64 decoding)
 - `INVENTORY_ENCRYPTION_KEY_VERSION` (positive integer written to every new
   inventory item)
+- `BANK_ACCOUNT_ENCRYPTION_KEY` (a separate standard-base64 32-byte key)
+- `BANK_ACCOUNT_ENCRYPTION_KEY_VERSION` (positive current bank key version)
 
 Inventory import is bounded by `INVENTORY_IMPORT_MAX_ITEMS`,
 `INVENTORY_IMPORT_MAX_ITEM_BYTES`, and `INVENTORY_IMPORT_MAX_TOTAL_BYTES`.
@@ -216,13 +230,17 @@ Losing it makes those rows permanently undecryptable; replacing it under the
 same version makes authentication fail. Phase 4 has a future-readable keyring
 seam but no rotation command. Keep keys outside PostgreSQL and Git.
 
-Other API controls include `TELEGRAM_WEBHOOK_BODY_LIMIT_BYTES`,
+Order creation controls include `ORDER_EXPIRE_MINUTES`, `ORDER_MAX_QUANTITY`,
+`PAYMENT_REFERENCE_PREFIX`, `PAYMENT_REFERENCE_RANDOM_BYTES`,
+`VIETQR_BASE_URL`, `VIETQR_TEMPLATE`, `ORDER_PAGE_SIZE`, and
+`BANK_ACCOUNT_PAGE_SIZE`. Other API controls include `TELEGRAM_WEBHOOK_BODY_LIMIT_BYTES`,
 `TELEGRAM_WEBHOOK_TIMEOUT_SECONDS`, `TELEGRAM_UPDATE_STALE_SECONDS`,
 `ADMIN_SESSION_TTL_MINUTES`, `TELEGRAM_API_TIMEOUT_SECONDS`, and
 `SUPPORT_CONTACT`. Operational variables and defaults are documented in
-`.env.example`. The worker uses a separate loader and therefore does not require
-Telegram tokens, admin bootstrap IDs, HTTP/webhook settings, or the inventory
-key. The migration process requires only `DATABASE_URL` and an optional
+`.env.example`. The worker uses `ORDER_EXPIRY_INTERVAL`,
+`ORDER_EXPIRY_BATCH_SIZE`, and `ORDER_EXPIRY_RUN_TIMEOUT`; its separate loader
+does not require Telegram tokens, admin IDs, HTTP/webhook settings, VietQR, or
+encryption keys. The migration process requires only `DATABASE_URL` and an optional
 `MIGRATIONS_DIR`.
 
 Back up PostgreSQL with authenticated access controls appropriate to the
@@ -242,10 +260,14 @@ without the matching key cannot recover inventory.
 - [Inventory encryption](docs/design/inventory-encryption.md)
 - [Inventory administration security](docs/design/inventory-admin-security.md)
 - [Inventory reservation](docs/design/inventory-reservation.md)
+- [Order creation](docs/design/order-creation.md)
+- [Order expiry](docs/design/order-expiry.md)
+- [VietQR payment instructions](docs/design/vietqr-payment-instructions.md)
 - [Phase 1 completion report](docs/phase-1-report.md)
 - [Phase 2 completion report](docs/phase-2-report.md)
 - [Phase 3 completion report](docs/phase-3-report.md)
 - [Phase 4 completion report](docs/phase-4-report.md)
+- [Phase 5 completion report](docs/phase-5-report.md)
 
 ## Repository layout
 
@@ -253,8 +275,10 @@ without the matching key cannot recover inventory.
 cmd/                    api, worker, migrate commands
 internal/config/        environment parsing and validation
 internal/httpapi/       Gin server, middleware, health endpoints
-internal/app/           user, catalog, receipt, admin, and inventory services
+internal/app/           user, catalog, order, bank, receipt, admin, and inventory services
+internal/bankcrypto/    encrypted bank-account number adapter
 internal/inventorycrypto/ versioned encryption and keyed fingerprints
+internal/vietqr/        deterministic payment-instruction URL adapter
 internal/telegram/      Telegram client, typed router, callbacks, and views
 internal/observability/ slog and Prometheus metrics
 internal/postgres/      pgx lifecycle and generated sqlc code
@@ -270,13 +294,16 @@ created when they gain working behaviour, not as empty skeletons.
 
 ## Current limitations
 
-- Telegram confirmation delivery has no outbox in Phase 4. If sending after a
+- Telegram confirmation delivery has no outbox in Phase 5. If sending after a
   successful commit fails, the database operation stays committed and the error
   is logged/measured; a duplicate update does not resend it.
-- Claim/release primitives do not create orders or deliver decrypted items.
-  Order creation, payment, wallet, and delivery services are not implemented.
+- Pending orders check current authenticated available inventory but do not
+  reserve it. Multiple pending orders may observe the same stock. Payment
+  acceptance and atomic claim belong to Phase 6.
+- No provider/manual payment confirmation, wallet, refund, automatic delivery,
+  or late-payment reconciliation is implemented.
 - Automatic reservation sweeping is deferred because no payment/delivery
   recovery flow can safely resolve sensitive order states yet.
-- The worker currently monitors its PostgreSQL dependency; durable job types
-  and external delivery begin in later phases.
+- The worker expires overdue pending orders without notifying Telegram.
+  Durable notification/outbox and external delivery begin in later phases.
 - Compose values are suitable only for local development.

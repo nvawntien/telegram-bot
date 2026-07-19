@@ -49,5 +49,9 @@ jobs:
           git diff --exit-code -- internal/postgres/generated
       - name: Validate Docker Compose configuration
         run: docker compose config --quiet
+      - name: Phase 5 migration cycle
+        run: go test -tags=integration -count=1 ./tests/integration -run '^TestMigrationCycle$'
+      - name: Phase 5 idempotency ownership and expiry
+        run: go test -tags=integration -count=1 ./tests/integration -run '^TestPhase5'
       - name: PostgreSQL integration, security, and concurrency tests
         run: make test-integration

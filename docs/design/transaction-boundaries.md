@@ -53,24 +53,30 @@ record. Bootstrap is intentionally idempotent and does not create a startup
 audit row, avoiding repeated audit noise; runtime authorization always reads
 `users` and `admins` from PostgreSQL.
 
-The inventory sections below are implemented in Phase 4. Order, payment,
-wallet, delivery, outbox, broadcast, and Sheet workflow sections remain target
+Inventory sections are implemented in Phase 4. Create order, customer
+cancellation, bank administration, and order expiry are implemented in Phase 5.
+Payment, wallet, delivery, outbox, broadcast, and Sheet sections remain target
 boundaries for later phases.
 
 ## Create order
 
 One transaction:
 
-1. Upsert/lock the Telegram user as needed; reject banned user.
+1. Lock the PostgreSQL Telegram user; reject missing, banned, or disabled user.
 2. Load active product and validate fulfilment type, requested quantity, and
    integer multiplication overflow.
 3. Count available inventory as an availability hint only.
 4. Insert order using unique `(user_id,idempotency_key)` and payment code.
-5. Insert immutable order-item name/price snapshots and payment instruction.
-6. Append initial state history and commit.
+5. Lock the selected active AES bank account and copy its protected envelope
+   and safe display metadata into the order.
+6. Insert immutable order-item name/price snapshots.
+7. Append initial state history, complete the update receipt, and commit.
 
-After commit, the handler returns/sends the VietQR instruction. If Telegram
-fails, a repeated callback returns the same order from the idempotency key.
+The confirmation callback carries a stable flow ID but never price, amount, or
+account number. Database uniqueness on `(user_id,idempotency_key)` and payment
+reference resolves sequential/concurrent retry races. After commit, the adapter
+decrypts only the order snapshot and builds the VietQR URL without network I/O.
+Telegram failure cannot roll back the order.
 
 ## Confirm provider/manual payment and claim inventory
 
@@ -129,18 +135,28 @@ an admin notification. Inventory mapping is retained.
 
 ## Order expiry
 
-A worker claims due `pending_payment` orders in batches with
-`FOR UPDATE SKIP LOCKED`. Each transaction rechecks state/time, transitions to
-expired, appends history, and records audit/system event. A concurrent payment
-holding the same order lock wins deterministically; the second transaction
-rechecks and follows late-payment policy.
+A configurable worker claims due `pending_payment` orders ordered by expiry and
+ID with `FOR UPDATE SKIP LOCKED`. The transaction rechecks state/time,
+transitions each selected row to expired, increments version, appends system
+history, and commits. It calls neither Telegram nor payment/inventory adapters.
+Notifications and late-payment policy are deferred.
 
 ## Customer/admin cancellation
 
-Lock the order, validate owner or RBAC and current state, transition once,
-append history/audit, and optionally enqueue notification. Duplicate callbacks
-return the existing cancelled outcome. Paid/reserving/delivering orders require
-the refund/recovery use case and cannot use simple cancellation.
+Customer cancellation locks an ownership-scoped order row, validates an
+unexpired `pending_payment` state and optimistic version, updates with an owner/
+state/time/version guard, appends one history row, completes the update receipt,
+and commits. A repeated cancellation returns the existing cancelled outcome
+without another history row. Non-pending states cannot use this path.
+
+## Bank administration
+
+Create, edit, activate, and deactivate each reauthorize the PostgreSQL admin,
+lock and verify the durable session owner/state/expiry/version, lock/validate
+the bank resource where applicable, mutate the encrypted envelope/metadata,
+write redacted audit JSON, finish the session, complete the update receipt, and
+commit. Account-number encryption happens before the transaction; plaintext is
+never stored in a session. There is no hard-delete use case.
 
 ## Inventory import
 
