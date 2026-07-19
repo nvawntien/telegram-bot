@@ -41,22 +41,27 @@ func ParseCommand(text string) (Command, bool) {
 type CallbackAction string
 
 const (
-	CallbackMenu                   CallbackAction = "menu"
-	CallbackSupport                CallbackAction = "support"
-	CallbackCategories             CallbackAction = "categories"
-	CallbackProducts               CallbackAction = "products"
-	CallbackProductDetail          CallbackAction = "product_detail"
-	CallbackAdminCategories        CallbackAction = "admin_categories"
-	CallbackAdminProducts          CallbackAction = "admin_products"
-	CallbackAdminCategoryNew       CallbackAction = "admin_category_new"
-	CallbackAdminCategoryEdit      CallbackAction = "admin_category_edit"
-	CallbackAdminCategoryAskToggle CallbackAction = "admin_category_ask_toggle"
-	CallbackAdminCategoryToggle    CallbackAction = "admin_category_toggle"
-	CallbackAdminProductNew        CallbackAction = "admin_product_new"
-	CallbackAdminProductEdit       CallbackAction = "admin_product_edit"
-	CallbackAdminProductAskToggle  CallbackAction = "admin_product_ask_toggle"
-	CallbackAdminProductToggle     CallbackAction = "admin_product_toggle"
-	CallbackAdminCancel            CallbackAction = "admin_cancel"
+	CallbackMenu                    CallbackAction = "menu"
+	CallbackSupport                 CallbackAction = "support"
+	CallbackCategories              CallbackAction = "categories"
+	CallbackProducts                CallbackAction = "products"
+	CallbackProductDetail           CallbackAction = "product_detail"
+	CallbackAdminCategories         CallbackAction = "admin_categories"
+	CallbackAdminProducts           CallbackAction = "admin_products"
+	CallbackAdminCategoryNew        CallbackAction = "admin_category_new"
+	CallbackAdminCategoryEdit       CallbackAction = "admin_category_edit"
+	CallbackAdminCategoryAskToggle  CallbackAction = "admin_category_ask_toggle"
+	CallbackAdminCategoryToggle     CallbackAction = "admin_category_toggle"
+	CallbackAdminProductNew         CallbackAction = "admin_product_new"
+	CallbackAdminProductEdit        CallbackAction = "admin_product_edit"
+	CallbackAdminProductAskToggle   CallbackAction = "admin_product_ask_toggle"
+	CallbackAdminProductToggle      CallbackAction = "admin_product_toggle"
+	CallbackAdminInventory          CallbackAction = "admin_inventory"
+	CallbackAdminInventoryList      CallbackAction = "admin_inventory_list"
+	CallbackAdminInventoryImport    CallbackAction = "admin_inventory_import"
+	CallbackAdminInventoryAskToggle CallbackAction = "admin_inventory_ask_toggle"
+	CallbackAdminInventoryToggle    CallbackAction = "admin_inventory_toggle"
+	CallbackAdminCancel             CallbackAction = "admin_cancel"
 )
 
 type Callback struct {
@@ -64,6 +69,7 @@ type Callback struct {
 	Page           int
 	CategoryID     int64
 	ProductID      int64
+	InventoryID    int64
 	RecordVersion  int64
 	SessionID      int64
 	SessionVersion int64
@@ -129,6 +135,65 @@ func parseAdminCallback(parts []string) (Callback, error) {
 			action = CallbackAdminProducts
 		}
 		return Callback{Action: action, Page: int(page)}, err
+	case "i":
+		page, err := parseNonNegative(parts, 3, 4)
+		return Callback{Action: CallbackAdminInventory, Page: int(page)}, err
+	case "il":
+		if len(parts) != 5 {
+			return Callback{}, ErrInvalidCallback
+		}
+		productID, err := positive(parts[3])
+		if err != nil {
+			return Callback{}, err
+		}
+		page, err := nonNegative(parts[4])
+		return Callback{Action: CallbackAdminInventoryList, ProductID: productID, Page: int(page)}, err
+	case "ii":
+		if len(parts) != 4 {
+			return Callback{}, ErrInvalidCallback
+		}
+		productID, err := positive(parts[3])
+		return Callback{Action: CallbackAdminInventoryImport, ProductID: productID}, err
+	case "is":
+		if len(parts) != 6 {
+			return Callback{}, ErrInvalidCallback
+		}
+		itemID, err := positive(parts[3])
+		if err != nil {
+			return Callback{}, err
+		}
+		version, err := positive(parts[4])
+		if err != nil {
+			return Callback{}, err
+		}
+		enabled, err := parseBoolBit(parts[5])
+		return Callback{Action: CallbackAdminInventoryAskToggle, InventoryID: itemID, RecordVersion: version, Active: enabled}, err
+	case "it":
+		if len(parts) != 8 {
+			return Callback{}, ErrInvalidCallback
+		}
+		sessionID, err := positive(parts[3])
+		if err != nil {
+			return Callback{}, err
+		}
+		sessionVersion, err := positive(parts[4])
+		if err != nil {
+			return Callback{}, err
+		}
+		itemID, err := positive(parts[5])
+		if err != nil {
+			return Callback{}, err
+		}
+		recordVersion, err := positive(parts[6])
+		if err != nil {
+			return Callback{}, err
+		}
+		enabled, err := parseBoolBit(parts[7])
+		return Callback{
+			Action: CallbackAdminInventoryToggle, SessionID: sessionID,
+			SessionVersion: sessionVersion, InventoryID: itemID,
+			RecordVersion: recordVersion, Active: enabled,
+		}, err
 	case "cn":
 		return exact(parts, 3, Callback{Action: CallbackAdminCategoryNew})
 	case "pn":

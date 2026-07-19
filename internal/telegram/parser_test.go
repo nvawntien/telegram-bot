@@ -33,6 +33,11 @@ func TestParseCallback(t *testing.T) {
 		{data: "v1:a:ce:3:2", action: CallbackAdminCategoryEdit},
 		{data: "v1:a:ca:3:2:0", action: CallbackAdminCategoryAskToggle},
 		{data: "v1:a:pt:1:2:3:4:1", action: CallbackAdminProductToggle},
+		{data: "v1:a:i:0", action: CallbackAdminInventory},
+		{data: "v1:a:il:12:3", action: CallbackAdminInventoryList},
+		{data: "v1:a:ii:12", action: CallbackAdminInventoryImport},
+		{data: "v1:a:is:42:3:0", action: CallbackAdminInventoryAskToggle},
+		{data: "v1:a:it:1:2:42:3:1", action: CallbackAdminInventoryToggle},
 	}
 	for _, test := range tests {
 		callback, err := ParseCallback(test.data)
@@ -47,6 +52,7 @@ func TestParseCallbackRejectsMalformedData(t *testing.T) {
 		"", "v2:m", "v1:unknown", "v1:c:-1", "v1:p:0:1", "v1:p:not-id:0",
 		"v1:m:extra", "v1:d:1:2", "v1:a:ct:1:2:3:4:2", "v1:a:ce:1",
 		strings.Repeat("x", MaxCallbackDataBytes+1), string([]byte{0xff}),
+		"v1:a:il:0:1", "v1:a:is:1:0:1", "v1:a:it:1:2:3:4:2",
 	}
 	for _, value := range values {
 		if _, err := ParseCallback(value); !errors.Is(err, ErrInvalidCallback) {

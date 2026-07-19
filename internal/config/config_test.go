@@ -30,6 +30,10 @@ func TestLoadValidConfig(t *testing.T) {
 	if cfg.TelegramWebhookBodyLimit != 1<<20 || cfg.AdminSessionTTL != 15*time.Minute {
 		t.Fatalf("Phase 3 defaults = body:%d session:%s", cfg.TelegramWebhookBodyLimit, cfg.AdminSessionTTL)
 	}
+	if cfg.InventoryEncryptionKeyVersion != 1 || cfg.InventoryImportMaxItems != 100 ||
+		cfg.InventoryImportMaxItemBytes != 4096 || cfg.InventoryImportMaxTotalBytes != 256*1024 {
+		t.Fatalf("Phase 4 defaults are invalid: %#v", cfg)
+	}
 }
 
 func TestLoadReportsAllInvalidValues(t *testing.T) {
@@ -81,9 +85,32 @@ func TestLoadWorkerDoesNotRequireWebhookConfiguration(t *testing.T) {
 	t.Setenv("TELEGRAM_WEBHOOK_SECRET", "")
 	t.Setenv("TELEGRAM_WEBHOOK_URL", "")
 	t.Setenv("HTTP_ADDR", "")
+	t.Setenv("TELEGRAM_BOT_TOKEN", "")
+	t.Setenv("ADMIN_TELEGRAM_IDS", "")
+	t.Setenv("INVENTORY_ENCRYPTION_KEY", "")
 
 	if _, err := LoadWorker(); err != nil {
 		t.Fatalf("LoadWorker() error = %v", err)
+	}
+}
+
+func TestLoadAPIValidatesInventoryConfiguration(t *testing.T) {
+	setValidEnvironment(t)
+	t.Setenv("INVENTORY_ENCRYPTION_KEY_VERSION", "0")
+	t.Setenv("INVENTORY_IMPORT_MAX_ITEM_BYTES", "200")
+	t.Setenv("INVENTORY_IMPORT_MAX_TOTAL_BYTES", "100")
+
+	_, err := LoadAPI()
+	if err == nil {
+		t.Fatal("LoadAPI() error = nil, want inventory validation error")
+	}
+	for _, expected := range []string{
+		"INVENTORY_ENCRYPTION_KEY_VERSION",
+		"INVENTORY_IMPORT_MAX_ITEM_BYTES",
+	} {
+		if !strings.Contains(err.Error(), expected) {
+			t.Errorf("LoadAPI() error %q does not contain %q", err, expected)
+		}
 	}
 }
 

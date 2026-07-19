@@ -14,43 +14,51 @@ import (
 )
 
 const (
-	defaultHTTPAddr                 = ":8080"
-	defaultShutdownWindow           = 10 * time.Second
-	defaultOrderExpiry              = 15 * time.Minute
-	defaultRetryBase                = 5 * time.Second
-	defaultWebhookBodyLimit   int64 = 1 << 20
-	defaultWebhookTimeout           = 5 * time.Second
-	defaultUpdateStaleAfter         = 2 * time.Minute
-	defaultAdminSessionTTL          = 15 * time.Minute
-	defaultTelegramAPITimeout       = 5 * time.Second
+	defaultHTTPAddr                      = ":8080"
+	defaultShutdownWindow                = 10 * time.Second
+	defaultOrderExpiry                   = 15 * time.Minute
+	defaultRetryBase                     = 5 * time.Second
+	defaultWebhookBodyLimit        int64 = 1 << 20
+	defaultWebhookTimeout                = 5 * time.Second
+	defaultUpdateStaleAfter              = 2 * time.Minute
+	defaultAdminSessionTTL               = 15 * time.Minute
+	defaultTelegramAPITimeout            = 5 * time.Second
+	defaultInventoryKeyVersion     int32 = 1
+	defaultInventoryImportMaxItems       = 100
+	defaultInventoryMaxItemBytes         = 4096
+	defaultInventoryMaxTotalBytes        = 256 * 1024
 )
 
 // Config is immutable after startup and is passed explicitly to process dependencies.
 type Config struct {
-	AppEnv                   string
-	HTTPAddr                 string
-	DatabaseURL              string
-	TelegramBotToken         string
-	TelegramWebhookSecret    string
-	TelegramWebhookURL       string
-	TelegramWebhookBodyLimit int64
-	TelegramWebhookTimeout   time.Duration
-	TelegramUpdateStaleAfter time.Duration
-	AdminSessionTTL          time.Duration
-	TelegramAPITimeout       time.Duration
-	SupportContact           string
-	AdminTelegramIDs         []int64
-	InventoryEncryptionKey   []byte
-	OrderExpiry              time.Duration
-	DeliveryMaxAttempts      int
-	DeliveryRetryBase        time.Duration
-	LogLevel                 slog.Level
-	PrometheusEnabled        bool
-	ShutdownTimeout          time.Duration
-	DatabaseMaxConnections   int32
-	DatabaseMinConnections   int32
-	DatabaseConnectionTTL    time.Duration
-	DatabaseHealthTimeout    time.Duration
+	AppEnv                        string
+	HTTPAddr                      string
+	DatabaseURL                   string
+	TelegramBotToken              string
+	TelegramWebhookSecret         string
+	TelegramWebhookURL            string
+	TelegramWebhookBodyLimit      int64
+	TelegramWebhookTimeout        time.Duration
+	TelegramUpdateStaleAfter      time.Duration
+	AdminSessionTTL               time.Duration
+	TelegramAPITimeout            time.Duration
+	SupportContact                string
+	AdminTelegramIDs              []int64
+	InventoryEncryptionKey        []byte
+	InventoryEncryptionKeyVersion int32
+	InventoryImportMaxItems       int
+	InventoryImportMaxItemBytes   int
+	InventoryImportMaxTotalBytes  int
+	OrderExpiry                   time.Duration
+	DeliveryMaxAttempts           int
+	DeliveryRetryBase             time.Duration
+	LogLevel                      slog.Level
+	PrometheusEnabled             bool
+	ShutdownTimeout               time.Duration
+	DatabaseMaxConnections        int32
+	DatabaseMinConnections        int32
+	DatabaseConnectionTTL         time.Duration
+	DatabaseHealthTimeout         time.Duration
 }
 
 // MigrationConfig contains only values required by the migration process.
@@ -79,33 +87,35 @@ func LoadWorker() (Config, error) {
 
 func load(process processKind) (Config, error) {
 	cfg := Config{
-		AppEnv:                   envOrDefault("APP_ENV", "local"),
-		HTTPAddr:                 envOrDefault("HTTP_ADDR", defaultHTTPAddr),
-		DatabaseURL:              strings.TrimSpace(os.Getenv("DATABASE_URL")),
-		TelegramBotToken:         strings.TrimSpace(os.Getenv("TELEGRAM_BOT_TOKEN")),
-		TelegramWebhookSecret:    strings.TrimSpace(os.Getenv("TELEGRAM_WEBHOOK_SECRET")),
-		TelegramWebhookURL:       strings.TrimSpace(os.Getenv("TELEGRAM_WEBHOOK_URL")),
-		TelegramWebhookBodyLimit: defaultWebhookBodyLimit,
-		TelegramWebhookTimeout:   defaultWebhookTimeout,
-		TelegramUpdateStaleAfter: defaultUpdateStaleAfter,
-		AdminSessionTTL:          defaultAdminSessionTTL,
-		TelegramAPITimeout:       defaultTelegramAPITimeout,
-		SupportContact:           envOrDefault("SUPPORT_CONTACT", "Vui lòng liên hệ quản trị viên cửa hàng."),
-		OrderExpiry:              defaultOrderExpiry,
-		DeliveryMaxAttempts:      5,
-		DeliveryRetryBase:        defaultRetryBase,
-		LogLevel:                 slog.LevelInfo,
-		PrometheusEnabled:        true,
-		ShutdownTimeout:          defaultShutdownWindow,
-		DatabaseMaxConnections:   20,
-		DatabaseMinConnections:   2,
-		DatabaseConnectionTTL:    30 * time.Minute,
-		DatabaseHealthTimeout:    2 * time.Second,
+		AppEnv:                        envOrDefault("APP_ENV", "local"),
+		HTTPAddr:                      envOrDefault("HTTP_ADDR", defaultHTTPAddr),
+		DatabaseURL:                   strings.TrimSpace(os.Getenv("DATABASE_URL")),
+		TelegramBotToken:              strings.TrimSpace(os.Getenv("TELEGRAM_BOT_TOKEN")),
+		TelegramWebhookSecret:         strings.TrimSpace(os.Getenv("TELEGRAM_WEBHOOK_SECRET")),
+		TelegramWebhookURL:            strings.TrimSpace(os.Getenv("TELEGRAM_WEBHOOK_URL")),
+		TelegramWebhookBodyLimit:      defaultWebhookBodyLimit,
+		TelegramWebhookTimeout:        defaultWebhookTimeout,
+		TelegramUpdateStaleAfter:      defaultUpdateStaleAfter,
+		AdminSessionTTL:               defaultAdminSessionTTL,
+		TelegramAPITimeout:            defaultTelegramAPITimeout,
+		InventoryEncryptionKeyVersion: defaultInventoryKeyVersion,
+		InventoryImportMaxItems:       defaultInventoryImportMaxItems,
+		InventoryImportMaxItemBytes:   defaultInventoryMaxItemBytes,
+		InventoryImportMaxTotalBytes:  defaultInventoryMaxTotalBytes,
+		SupportContact:                envOrDefault("SUPPORT_CONTACT", "Vui lòng liên hệ quản trị viên cửa hàng."),
+		OrderExpiry:                   defaultOrderExpiry,
+		DeliveryMaxAttempts:           5,
+		DeliveryRetryBase:             defaultRetryBase,
+		LogLevel:                      slog.LevelInfo,
+		PrometheusEnabled:             true,
+		ShutdownTimeout:               defaultShutdownWindow,
+		DatabaseMaxConnections:        20,
+		DatabaseMinConnections:        2,
+		DatabaseConnectionTTL:         30 * time.Minute,
+		DatabaseHealthTimeout:         2 * time.Second,
 	}
 
 	var problems []error
-	assign(&problems, "ADMIN_TELEGRAM_IDS", parseAdminIDs(os.Getenv("ADMIN_TELEGRAM_IDS")), &cfg.AdminTelegramIDs)
-	assign(&problems, "INVENTORY_ENCRYPTION_KEY", parseEncryptionKey(os.Getenv("INVENTORY_ENCRYPTION_KEY")), &cfg.InventoryEncryptionKey)
 	assign(&problems, "ORDER_EXPIRE_MINUTES", parsePositiveDuration(os.Getenv("ORDER_EXPIRE_MINUTES"), time.Minute, cfg.OrderExpiry), &cfg.OrderExpiry)
 	assign(&problems, "DELIVERY_MAX_ATTEMPTS", parsePositiveInt(os.Getenv("DELIVERY_MAX_ATTEMPTS"), cfg.DeliveryMaxAttempts), &cfg.DeliveryMaxAttempts)
 	assign(&problems, "DELIVERY_RETRY_BASE_SECONDS", parsePositiveDuration(os.Getenv("DELIVERY_RETRY_BASE_SECONDS"), time.Second, cfg.DeliveryRetryBase), &cfg.DeliveryRetryBase)
@@ -117,6 +127,12 @@ func load(process processKind) (Config, error) {
 	assign(&problems, "DATABASE_CONNECTION_TTL_MINUTES", parsePositiveDuration(os.Getenv("DATABASE_CONNECTION_TTL_MINUTES"), time.Minute, cfg.DatabaseConnectionTTL), &cfg.DatabaseConnectionTTL)
 	assign(&problems, "DATABASE_HEALTH_TIMEOUT_SECONDS", parsePositiveDuration(os.Getenv("DATABASE_HEALTH_TIMEOUT_SECONDS"), time.Second, cfg.DatabaseHealthTimeout), &cfg.DatabaseHealthTimeout)
 	if process == processAPI {
+		assign(&problems, "ADMIN_TELEGRAM_IDS", parseAdminIDs(os.Getenv("ADMIN_TELEGRAM_IDS")), &cfg.AdminTelegramIDs)
+		assign(&problems, "INVENTORY_ENCRYPTION_KEY", parseEncryptionKey(os.Getenv("INVENTORY_ENCRYPTION_KEY")), &cfg.InventoryEncryptionKey)
+		assign(&problems, "INVENTORY_ENCRYPTION_KEY_VERSION", parsePositiveInt32(os.Getenv("INVENTORY_ENCRYPTION_KEY_VERSION"), cfg.InventoryEncryptionKeyVersion), &cfg.InventoryEncryptionKeyVersion)
+		assign(&problems, "INVENTORY_IMPORT_MAX_ITEMS", parsePositiveInt(os.Getenv("INVENTORY_IMPORT_MAX_ITEMS"), cfg.InventoryImportMaxItems), &cfg.InventoryImportMaxItems)
+		assign(&problems, "INVENTORY_IMPORT_MAX_ITEM_BYTES", parsePositiveInt(os.Getenv("INVENTORY_IMPORT_MAX_ITEM_BYTES"), cfg.InventoryImportMaxItemBytes), &cfg.InventoryImportMaxItemBytes)
+		assign(&problems, "INVENTORY_IMPORT_MAX_TOTAL_BYTES", parsePositiveInt(os.Getenv("INVENTORY_IMPORT_MAX_TOTAL_BYTES"), cfg.InventoryImportMaxTotalBytes), &cfg.InventoryImportMaxTotalBytes)
 		assign(&problems, "TELEGRAM_WEBHOOK_BODY_LIMIT_BYTES", parsePositiveInt64(os.Getenv("TELEGRAM_WEBHOOK_BODY_LIMIT_BYTES"), cfg.TelegramWebhookBodyLimit), &cfg.TelegramWebhookBodyLimit)
 		assign(&problems, "TELEGRAM_WEBHOOK_TIMEOUT_SECONDS", parsePositiveDuration(os.Getenv("TELEGRAM_WEBHOOK_TIMEOUT_SECONDS"), time.Second, cfg.TelegramWebhookTimeout), &cfg.TelegramWebhookTimeout)
 		assign(&problems, "TELEGRAM_UPDATE_STALE_SECONDS", parsePositiveDuration(os.Getenv("TELEGRAM_UPDATE_STALE_SECONDS"), time.Second, cfg.TelegramUpdateStaleAfter), &cfg.TelegramUpdateStaleAfter)
@@ -162,11 +178,9 @@ func assign[T any](problems *[]error, name string, result parseResult[T], target
 
 func validate(cfg Config, process processKind) []error {
 	var problems []error
-	required := map[string]string{
-		"DATABASE_URL":       cfg.DatabaseURL,
-		"TELEGRAM_BOT_TOKEN": cfg.TelegramBotToken,
-	}
+	required := map[string]string{"DATABASE_URL": cfg.DatabaseURL}
 	if process == processAPI {
+		required["TELEGRAM_BOT_TOKEN"] = cfg.TelegramBotToken
 		required["TELEGRAM_WEBHOOK_SECRET"] = cfg.TelegramWebhookSecret
 		required["TELEGRAM_WEBHOOK_URL"] = cfg.TelegramWebhookURL
 	}
@@ -196,11 +210,19 @@ func validate(cfg Config, process processKind) []error {
 	if process == processAPI && (strings.TrimSpace(cfg.SupportContact) == "" || len([]rune(cfg.SupportContact)) > 200) {
 		problems = append(problems, errors.New("SUPPORT_CONTACT must contain 1 to 200 characters"))
 	}
-	if len(cfg.AdminTelegramIDs) == 0 {
-		problems = append(problems, errors.New("ADMIN_TELEGRAM_IDS must contain at least one positive ID"))
-	}
-	if len(cfg.InventoryEncryptionKey) != 32 {
-		problems = append(problems, errors.New("INVENTORY_ENCRYPTION_KEY must decode to exactly 32 bytes"))
+	if process == processAPI {
+		if len(cfg.AdminTelegramIDs) == 0 {
+			problems = append(problems, errors.New("ADMIN_TELEGRAM_IDS must contain at least one positive ID"))
+		}
+		if len(cfg.InventoryEncryptionKey) != 32 {
+			problems = append(problems, errors.New("INVENTORY_ENCRYPTION_KEY must decode to exactly 32 bytes"))
+		}
+		if cfg.InventoryEncryptionKeyVersion <= 0 {
+			problems = append(problems, errors.New("INVENTORY_ENCRYPTION_KEY_VERSION must be positive"))
+		}
+		if cfg.InventoryImportMaxItemBytes > cfg.InventoryImportMaxTotalBytes {
+			problems = append(problems, errors.New("INVENTORY_IMPORT_MAX_ITEM_BYTES cannot exceed INVENTORY_IMPORT_MAX_TOTAL_BYTES"))
+		}
 	}
 	if cfg.DatabaseMinConnections > cfg.DatabaseMaxConnections {
 		problems = append(problems, errors.New("DATABASE_MIN_CONNECTIONS cannot exceed DATABASE_MAX_CONNECTIONS"))

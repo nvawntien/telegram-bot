@@ -104,7 +104,7 @@ func TestPhase3CustomerCommandsAndCallbackRouting(t *testing.T) {
 	updates := app.NewUpdateService(store, time.Minute)
 	messenger := &recordingMessenger{}
 	router := telegramadapter.NewRouter(
-		users, catalog, admins, updates, messenger, "@shop_support",
+		users, catalog, admins, nil, updates, messenger, "@shop_support",
 		slog.New(slog.NewTextHandler(io.Discard, nil)), nil,
 	)
 
@@ -410,7 +410,7 @@ func TestPhase3TelegramSendFailureDoesNotRollbackAdminMutation(t *testing.T) {
 	}
 	messenger := &failingMessenger{err: errors.New("Telegram unavailable")}
 	router := telegramadapter.NewRouter(
-		users, catalog, admins, updates, messenger, "Support",
+		users, catalog, admins, nil, updates, messenger, "Support",
 		slog.New(slog.NewTextHandler(io.Discard, nil)), nil,
 	)
 	telegramUser := models.User{ID: telegramID, FirstName: "Admin"}

@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/nvawntien/telegram-bot/internal/app"
+	"github.com/nvawntien/telegram-bot/internal/domain"
 )
 
 func Escape(value string) string {
@@ -63,10 +64,62 @@ func ProductView(product app.Product, categoryID int64, page int) (string, Keybo
 }
 
 func AdminMenu() (string, Keyboard) {
-	return "<b>Quản trị catalog</b>", Keyboard{
+	return "<b>Quản trị cửa hàng</b>", Keyboard{
 		{{Text: "Danh mục", Data: "v1:a:c:0"}},
 		{{Text: "Sản phẩm", Data: "v1:a:p:0"}},
+		{{Text: "Kho mã hóa", Data: "v1:a:i:0"}},
 	}
+}
+
+func AdminInventoryOverviewView(page app.InventoryOverviewPage) (string, Keyboard) {
+	rows := make(Keyboard, 0, len(page.Items)+1)
+	lines := []string{"<b>Tổng quan kho mã hóa</b>"}
+	for _, item := range page.Items {
+		lines = append(lines, fmt.Sprintf(
+			"\n<b>%s</b> (#%d)\nCó sẵn: %d · Đã giữ: %d · Đã bán: %d · Tắt: %d · Tổng: %d",
+			Escape(item.ProductName), item.ProductID, item.AvailableCount,
+			item.ReservedCount, item.SoldCount, item.DisabledCount, item.TotalCount,
+		))
+		rows = append(rows, []Button{{
+			Text: fmt.Sprintf("%s (%d/%d)", item.ProductName, item.AvailableCount, item.TotalCount),
+			Data: fmt.Sprintf("v1:a:il:%d:0", item.ProductID),
+		}})
+	}
+	if len(page.Items) == 0 {
+		lines = append(lines, "\nChưa có sản phẩm inventory.")
+	}
+	rows = append(rows, navigationRows("v1:a:i:%d", page.Page)...)
+	return strings.Join(lines, "\n"), rows
+}
+
+func AdminInventoryItemsView(productID int64, page app.RedactedInventoryPage) (string, Keyboard) {
+	rows := Keyboard{{{Text: "➕ Import stock", Data: fmt.Sprintf("v1:a:ii:%d", productID)}}}
+	lines := []string{fmt.Sprintf("<b>Inventory đã redacted</b> · sản phẩm #%d", productID)}
+	for _, item := range page.Items {
+		line := fmt.Sprintf("#%d · %s · key v%d · version %d", item.ID, Escape(string(item.Status)), item.KeyVersion, item.Version)
+		if !item.CreatedAt.IsZero() {
+			line += " · " + item.CreatedAt.UTC().Format("2006-01-02")
+		}
+		if item.ReservedOrderID > 0 {
+			line += fmt.Sprintf(" · order #%d", item.ReservedOrderID)
+		}
+		if !item.ReservedUntil.IsZero() {
+			line += " đến " + item.ReservedUntil.UTC().Format("2006-01-02 15:04Z")
+		}
+		lines = append(lines, line)
+		switch item.Status {
+		case domain.InventoryStatusAvailable:
+			rows = append(rows, []Button{{Text: fmt.Sprintf("Tắt #%d", item.ID), Data: fmt.Sprintf("v1:a:is:%d:%d:0", item.ID, item.Version)}})
+		case domain.InventoryStatusDisabled:
+			rows = append(rows, []Button{{Text: fmt.Sprintf("Bật #%d", item.ID), Data: fmt.Sprintf("v1:a:is:%d:%d:1", item.ID, item.Version)}})
+		}
+	}
+	if len(page.Items) == 0 {
+		lines = append(lines, "Chưa có item.")
+	}
+	rows = append(rows, navigationRows(fmt.Sprintf("v1:a:il:%d:%%d", productID), page.Page)...)
+	rows = append(rows, []Button{{Text: "⬅️ Tổng quan", Data: "v1:a:i:0"}})
+	return strings.Join(lines, "\n"), rows
 }
 
 func AdminCategoriesView(page app.CategoryPage) (string, Keyboard) {

@@ -27,6 +27,7 @@ type Router struct {
 	users          *app.UserService
 	catalog        *app.CatalogService
 	admins         *app.AdminService
+	inventory      *app.InventoryAdminService
 	updates        *app.UpdateService
 	messenger      Messenger
 	supportContact string
@@ -38,6 +39,7 @@ func NewRouter(
 	users *app.UserService,
 	catalog *app.CatalogService,
 	admins *app.AdminService,
+	inventory *app.InventoryAdminService,
 	updates *app.UpdateService,
 	messenger Messenger,
 	supportContact string,
@@ -45,7 +47,7 @@ func NewRouter(
 	metrics RouterMetrics,
 ) *Router {
 	return &Router{
-		users: users, catalog: catalog, admins: admins, updates: updates,
+		users: users, catalog: catalog, admins: admins, inventory: inventory, updates: updates,
 		messenger: messenger, supportContact: supportContact, logger: logger, metrics: metrics,
 	}
 }
@@ -141,7 +143,7 @@ func (r *Router) handleMessage(ctx context.Context, update *models.Update, reque
 	if commandFound {
 		return r.handleCommand(ctx, update.ID, requestID, message, user, command)
 	}
-	if strings.TrimSpace(message.Text) != "" {
+	if message.Text != "" {
 		if session, sessionErr := r.admins.LoadSession(ctx, message.From.ID); sessionErr == nil {
 			return r.handleSessionText(ctx, update.ID, requestID, message, session)
 		}
@@ -254,6 +256,61 @@ func (r *Router) routeCallback(ctx context.Context, telegramID int64, callback C
 			}
 			plan.text, plan.keyboard = AdminProductsView(page)
 		}
+	case CallbackAdminInventory:
+		page, err := r.inventory.ListOverview(ctx, telegramID, callback.Page)
+		if err != nil {
+			return plan, err
+		}
+		plan.text, plan.keyboard = AdminInventoryOverviewView(page)
+	case CallbackAdminInventoryList:
+		page, err := r.inventory.ListItems(ctx, telegramID, callback.ProductID, callback.Page)
+		if err != nil {
+			return plan, err
+		}
+		plan.text, plan.keyboard = AdminInventoryItemsView(callback.ProductID, page)
+	case CallbackAdminInventoryImport:
+		session, err := r.admins.StartSession(ctx, telegramID, app.SessionInventoryImport, workflowPayload{
+			Step: "payload", ProductID: callback.ProductID,
+		}, meta)
+		r.observeSession("start", err)
+		if err != nil {
+			return plan, err
+		}
+		plan.text = "Gửi inventory, mỗi dòng là một item. Nội dung sẽ không được hiển thị lại."
+		plan.keyboard, plan.completedByApp = cancelKeyboard(session), true
+	case CallbackAdminInventoryAskToggle:
+		session, err := r.admins.StartSession(ctx, telegramID, app.SessionInventoryToggle, workflowPayload{
+			Step: "confirm", InventoryItemID: callback.InventoryID,
+			RecordVersion: callback.RecordVersion, Active: callback.Active,
+		}, meta)
+		r.observeSession("start", err)
+		if err != nil {
+			return plan, err
+		}
+		action := "tắt"
+		if callback.Active {
+			action = "bật"
+		}
+		plan.text = fmt.Sprintf("Xác nhận %s inventory item #%d?", action, callback.InventoryID)
+		plan.keyboard = Keyboard{{{Text: "Xác nhận", Data: fmt.Sprintf(
+			"v1:a:it:%d:%d:%d:%d:%d", session.ID, session.Version,
+			callback.InventoryID, callback.RecordVersion, boolBit(callback.Active),
+		)}}}
+		plan.completedByApp = true
+	case CallbackAdminInventoryToggle:
+		admin, err := r.admins.Authorize(ctx, telegramID, true)
+		if err != nil {
+			return plan, err
+		}
+		session := app.AdminSession{ID: callback.SessionID, AdminID: admin.ID, Version: callback.SessionVersion}
+		item, err := r.inventory.SetItemEnabled(
+			ctx, telegramID, session, callback.InventoryID, callback.RecordVersion, callback.Active, meta,
+		)
+		if err != nil {
+			return plan, err
+		}
+		plan.text = fmt.Sprintf("Đã cập nhật inventory item #%d thành %s.", item.ID, Escape(string(item.Status)))
+		plan.keyboard, plan.completedByApp = nil, true
 	case CallbackAdminCategoryNew:
 		session, err := r.admins.StartSession(ctx, telegramID, app.SessionCategoryCreate, workflowPayload{Step: "name"}, meta)
 		r.observeSession("start", err)
@@ -355,14 +412,16 @@ func (r *Router) routeCallback(ctx context.Context, telegramID int64, callback C
 }
 
 type workflowPayload struct {
-	Step          string `json:"step"`
-	CategoryID    int64  `json:"category_id,omitempty"`
-	ProductID     int64  `json:"product_id,omitempty"`
-	RecordVersion int64  `json:"record_version,omitempty"`
-	Name          string `json:"name,omitempty"`
-	Description   string `json:"description,omitempty"`
-	SortOrder     int32  `json:"sort_order,omitempty"`
-	PriceVND      int64  `json:"price_vnd,omitempty"`
+	Step            string `json:"step"`
+	CategoryID      int64  `json:"category_id,omitempty"`
+	ProductID       int64  `json:"product_id,omitempty"`
+	RecordVersion   int64  `json:"record_version,omitempty"`
+	InventoryItemID int64  `json:"inventory_item_id,omitempty"`
+	Active          bool   `json:"active,omitempty"`
+	Name            string `json:"name,omitempty"`
+	Description     string `json:"description,omitempty"`
+	SortOrder       int32  `json:"sort_order,omitempty"`
+	PriceVND        int64  `json:"price_vnd,omitempty"`
 }
 
 func (r *Router) handleSessionText(ctx context.Context, updateID int64, requestID string, message *models.Message, session app.AdminSession) (responsePlan, error) {
@@ -374,6 +433,20 @@ func (r *Router) handleSessionText(ctx context.Context, updateID int64, requestI
 	meta := app.RequestMeta{RequestID: requestID, UpdateID: updateID}
 	plan := responsePlan{chatID: message.Chat.ID, completedByApp: true}
 	switch session.State {
+	case app.SessionInventoryImport:
+		if payload.Step != "payload" || payload.ProductID <= 0 {
+			return responsePlan{}, app.ErrStaleVersion
+		}
+		result, err := r.inventory.Import(
+			ctx, message.From.ID, session, payload.ProductID, []byte(message.Text), meta,
+		)
+		if err != nil {
+			return responsePlan{}, err
+		}
+		plan.text = fmt.Sprintf(
+			"Import hoàn tất: đã thêm %d, trùng %d, bỏ qua %d.",
+			result.Inserted, result.Duplicates, result.Rejected,
+		)
 	case app.SessionCategoryCreate, app.SessionCategoryEdit:
 		if payload.Step == "name" {
 			if text == "" || len([]rune(text)) > 120 {
@@ -587,6 +660,14 @@ func errorCode(err error) string {
 	switch {
 	case errors.Is(err, app.ErrInvalidInput):
 		return "invalid_input"
+	case errors.Is(err, app.ErrInvalidInventoryPayload):
+		return "invalid_input"
+	case errors.Is(err, app.ErrImportLimitExceeded):
+		return "limit_exceeded"
+	case errors.Is(err, app.ErrInventoryNotFound):
+		return "not_found"
+	case errors.Is(err, app.ErrInvalidInventoryState), errors.Is(err, app.ErrInventoryUnavailable):
+		return "stale"
 	case errors.Is(err, app.ErrForbidden), errors.Is(err, app.ErrUnauthorized):
 		return "forbidden"
 	case errors.Is(err, app.ErrNotFound):
@@ -616,6 +697,8 @@ func userError(err error) string {
 		return "Thao tác đã cũ, vui lòng mở lại menu."
 	case "conflict":
 		return "Dữ liệu đã tồn tại hoặc vừa thay đổi."
+	case "limit_exceeded":
+		return "Dữ liệu import vượt giới hạn cho phép."
 	default:
 		return "Có lỗi xảy ra, vui lòng thử lại."
 	}

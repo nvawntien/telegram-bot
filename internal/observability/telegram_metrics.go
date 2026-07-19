@@ -7,15 +7,24 @@ import (
 )
 
 type TelegramMetrics struct {
-	webhookRequests *prometheus.CounterVec
-	updates         *prometheus.CounterVec
-	updateDuration  *prometheus.HistogramVec
-	duplicates      prometheus.Counter
-	apiRequests     *prometheus.CounterVec
-	apiDuration     *prometheus.HistogramVec
-	catalogQueries  *prometheus.CounterVec
-	adminMutations  *prometheus.CounterVec
-	adminSessions   *prometheus.CounterVec
+	webhookRequests        *prometheus.CounterVec
+	updates                *prometheus.CounterVec
+	updateDuration         *prometheus.HistogramVec
+	duplicates             prometheus.Counter
+	apiRequests            *prometheus.CounterVec
+	apiDuration            *prometheus.HistogramVec
+	catalogQueries         *prometheus.CounterVec
+	adminMutations         *prometheus.CounterVec
+	adminSessions          *prometheus.CounterVec
+	inventoryImports       *prometheus.CounterVec
+	inventoryImportedItems prometheus.Counter
+	inventoryDuplicates    prometheus.Counter
+	inventoryClaims        *prometheus.CounterVec
+	inventoryClaimedItems  prometheus.Counter
+	inventoryReleases      *prometheus.CounterVec
+	inventoryReleasedItems prometheus.Counter
+	inventoryEncryption    *prometheus.CounterVec
+	inventoryRecovery      *prometheus.CounterVec
 }
 
 func NewTelegramMetrics(registerer prometheus.Registerer) *TelegramMetrics {
@@ -56,11 +65,50 @@ func NewTelegramMetrics(registerer prometheus.Registerer) *TelegramMetrics {
 			Namespace: "telegram_shop", Name: "admin_session_operations_total",
 			Help: "Admin session operations by operation and result.",
 		}, []string{"operation", "result"}),
+		inventoryImports: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Namespace: "telegram_shop", Name: "inventory_import_requests_total",
+			Help: "Inventory import requests by bounded result.",
+		}, []string{"result"}),
+		inventoryImportedItems: prometheus.NewCounter(prometheus.CounterOpts{
+			Namespace: "telegram_shop", Name: "inventory_items_imported_total",
+			Help: "Encrypted inventory items imported.",
+		}),
+		inventoryDuplicates: prometheus.NewCounter(prometheus.CounterOpts{
+			Namespace: "telegram_shop", Name: "inventory_duplicates_total",
+			Help: "Inventory import duplicates skipped.",
+		}),
+		inventoryClaims: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Namespace: "telegram_shop", Name: "inventory_claim_requests_total",
+			Help: "Inventory claim requests by bounded result.",
+		}, []string{"result"}),
+		inventoryClaimedItems: prometheus.NewCounter(prometheus.CounterOpts{
+			Namespace: "telegram_shop", Name: "inventory_items_claimed_total",
+			Help: "Inventory items claimed atomically.",
+		}),
+		inventoryReleases: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Namespace: "telegram_shop", Name: "inventory_release_requests_total",
+			Help: "Inventory release requests by bounded result.",
+		}, []string{"result"}),
+		inventoryReleasedItems: prometheus.NewCounter(prometheus.CounterOpts{
+			Namespace: "telegram_shop", Name: "inventory_items_released_total",
+			Help: "Inventory items released safely.",
+		}),
+		inventoryEncryption: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Namespace: "telegram_shop", Name: "inventory_encryption_operations_total",
+			Help: "Inventory cryptographic operations by bounded operation and result.",
+		}, []string{"operation", "result"}),
+		inventoryRecovery: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Namespace: "telegram_shop", Name: "inventory_reservation_recovery_total",
+			Help: "Inventory reservation recovery decisions by bounded result.",
+		}, []string{"result"}),
 	}
 	registerer.MustRegister(
 		metrics.webhookRequests, metrics.updates, metrics.updateDuration,
 		metrics.duplicates, metrics.apiRequests, metrics.apiDuration,
 		metrics.catalogQueries, metrics.adminMutations, metrics.adminSessions,
+		metrics.inventoryImports, metrics.inventoryImportedItems, metrics.inventoryDuplicates,
+		metrics.inventoryClaims, metrics.inventoryClaimedItems, metrics.inventoryReleases,
+		metrics.inventoryReleasedItems, metrics.inventoryEncryption, metrics.inventoryRecovery,
 	)
 	return metrics
 }
@@ -93,4 +141,28 @@ func (m *TelegramMetrics) ObserveAdminMutation(operation, result string) {
 
 func (m *TelegramMetrics) ObserveAdminSession(operation, result string) {
 	m.adminSessions.WithLabelValues(operation, result).Inc()
+}
+
+func (m *TelegramMetrics) ObserveInventoryImport(result string, inserted, duplicates int) {
+	m.inventoryImports.WithLabelValues(result).Inc()
+	m.inventoryImportedItems.Add(float64(inserted))
+	m.inventoryDuplicates.Add(float64(duplicates))
+}
+
+func (m *TelegramMetrics) ObserveInventoryClaim(result string, claimed int) {
+	m.inventoryClaims.WithLabelValues(result).Inc()
+	m.inventoryClaimedItems.Add(float64(claimed))
+}
+
+func (m *TelegramMetrics) ObserveInventoryRelease(result string, released int) {
+	m.inventoryReleases.WithLabelValues(result).Inc()
+	m.inventoryReleasedItems.Add(float64(released))
+}
+
+func (m *TelegramMetrics) ObserveInventoryEncryption(operation, result string) {
+	m.inventoryEncryption.WithLabelValues(operation, result).Inc()
+}
+
+func (m *TelegramMetrics) ObserveInventoryRecovery(result string) {
+	m.inventoryRecovery.WithLabelValues(result).Inc()
 }

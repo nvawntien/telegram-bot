@@ -40,8 +40,13 @@ func TestTelegramMetricsCanUseIsolatedRegistries(t *testing.T) {
 		metrics.ObserveCatalog("list_categories", "success")
 		metrics.ObserveAdminMutation("category.create", "success")
 		metrics.ObserveAdminSession("start", "success")
+		metrics.ObserveInventoryImport("success", 2, 1)
+		metrics.ObserveInventoryClaim("success", 1)
+		metrics.ObserveInventoryRelease("success", 1)
+		metrics.ObserveInventoryEncryption("encrypt", "success")
+		metrics.ObserveInventoryRecovery("required")
 		families, err := registry.Gather()
-		if err != nil || len(families) != 9 {
+		if err != nil || len(families) != 18 {
 			t.Fatalf("Telegram registry families = %d, %v", len(families), err)
 		}
 	}

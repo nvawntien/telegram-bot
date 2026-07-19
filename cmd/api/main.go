@@ -12,6 +12,7 @@ import (
 	"github.com/nvawntien/telegram-bot/internal/app"
 	"github.com/nvawntien/telegram-bot/internal/config"
 	"github.com/nvawntien/telegram-bot/internal/httpapi"
+	"github.com/nvawntien/telegram-bot/internal/inventorycrypto"
 	"github.com/nvawntien/telegram-bot/internal/observability"
 	"github.com/nvawntien/telegram-bot/internal/postgres"
 	telegramadapter "github.com/nvawntien/telegram-bot/internal/telegram"
@@ -57,6 +58,20 @@ func run(ctx context.Context) error {
 	if err := adminService.Bootstrap(ctx, cfg.AdminTelegramIDs); err != nil {
 		return fmt.Errorf("bootstrap administrators: %w", err)
 	}
+	inventoryCipher, err := inventorycrypto.New(
+		cfg.InventoryEncryptionKey, cfg.InventoryEncryptionKeyVersion, telegramMetrics,
+	)
+	if err != nil {
+		return fmt.Errorf("initialize inventory encryption: %w", err)
+	}
+	inventoryService := app.NewInventoryAdminService(
+		store, adminService, inventoryCipher,
+		app.InventoryImportLimits{
+			MaxItems: cfg.InventoryImportMaxItems, MaxItemBytes: cfg.InventoryImportMaxItemBytes,
+			MaxTotalBytes: cfg.InventoryImportMaxTotalBytes,
+		},
+		app.DefaultPageSize, telegramMetrics,
+	)
 	updateService := app.NewUpdateService(store, cfg.TelegramUpdateStaleAfter)
 	telegramClient, err := telegramadapter.NewClient(
 		cfg.TelegramBotToken, "", cfg.TelegramAPITimeout, 1<<20, telegramMetrics,
@@ -65,7 +80,7 @@ func run(ctx context.Context) error {
 		return err
 	}
 	telegramRouter := telegramadapter.NewRouter(
-		userService, catalogService, adminService, updateService, telegramClient,
+		userService, catalogService, adminService, inventoryService, updateService, telegramClient,
 		cfg.SupportContact, logger, telegramMetrics,
 	)
 	telegramWebhook := httpapi.NewTelegramWebhook(
