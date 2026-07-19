@@ -188,9 +188,10 @@ func handleExistingPayment(ctx context.Context, queries *generated.Queries, comm
 	if err == nil {
 		result.Decision = "duplicate"
 		result.Target = allocation.TargetType
-		if allocation.TargetType == "order" {
+		switch allocation.TargetType {
+		case "order":
 			result.OrderID = allocation.TargetID
-		} else if allocation.TargetType == "wallet_topup" {
+		case "wallet_topup":
 			result.TopupID = allocation.TargetID
 		}
 		return completePaymentEvent(ctx, queries, command.PaymentEventID, "completed", result.OrderID, result.TopupID, acceptedAt, "", "")

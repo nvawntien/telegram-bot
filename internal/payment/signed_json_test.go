@@ -5,6 +5,7 @@ import (
 	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"net/http"
 	"strings"
@@ -54,7 +55,7 @@ func TestSignedJSONRejectsSignatureTamperingAndReplay(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			verifier := newTestVerifier(t, now, time.Minute)
 			_, err := verifier.VerifyAndNormalize(context.Background(), test.headers(test.body), test.body)
-			if err != test.want {
+			if !errors.Is(err, test.want) {
 				t.Fatalf("error = %v, want %v", err, test.want)
 			}
 		})
@@ -71,7 +72,7 @@ func TestSignedJSONTimestampBoundaryAndValidation(t *testing.T) {
 
 	invalid := strings.Replace(string(validBody(now)), "TS-ABC123", " TS-ABC123 ", 1)
 	invalidBody := []byte(invalid)
-	if _, err := verifier.VerifyAndNormalize(context.Background(), signedHeaders(invalidBody, now), invalidBody); err != app.ErrInvalidInput {
+	if _, err := verifier.VerifyAndNormalize(context.Background(), signedHeaders(invalidBody, now), invalidBody); !errors.Is(err, app.ErrInvalidInput) {
 		t.Fatalf("whitespace reference error = %v", err)
 	}
 }

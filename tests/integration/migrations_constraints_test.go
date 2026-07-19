@@ -161,8 +161,8 @@ func TestCoreCheckAndUniqueConstraints(t *testing.T) {
 			_, err := database.pool.Exec(ctx, `
 				INSERT INTO payments (
 					order_id, user_id, purpose, provider, provider_transaction_id,
-					payment_reference, amount_vnd, status, confirmed_at
-				) VALUES ($1, $2, 'order', 'provider-a', 'transaction-duplicate', $3, 10000, 'confirmed', clock_timestamp())
+					payment_reference, amount_vnd, status, occurred_at, confirmed_at
+				) VALUES ($1, $2, 'order', 'provider-a', 'transaction-duplicate', $3, 10000, 'confirmed', clock_timestamp(), clock_timestamp())
 			`, order.ID, user.ID, key)
 			if index == 0 && err != nil {
 				t.Fatalf("insert first payment: %v", err)
