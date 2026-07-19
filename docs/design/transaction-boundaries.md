@@ -53,10 +53,9 @@ record. Bootstrap is intentionally idempotent and does not create a startup
 audit row, avoiding repeated audit noise; runtime authorization always reads
 `users` and `admins` from PostgreSQL.
 
-Inventory sections are implemented in Phase 4. Create order, customer
-cancellation, bank administration, and order expiry are implemented in Phase 5.
-Payment, wallet, delivery, outbox, broadcast, and Sheet sections remain target
-boundaries for later phases.
+Inventory sections are implemented in Phase 4. Ordering is Phase 5. Payment and
+wallet boundaries below are implemented in Phase 6. Delivery consumption,
+broadcast, and Sheet sections remain later-phase targets.
 
 ## Create order
 
@@ -90,21 +89,24 @@ One serializable-by-locking transaction:
 4. Insert/update payment and record `paid`, then `reserving`, status history.
 5. Claim exactly the required inventory using ordered
    `FOR UPDATE SKIP LOCKED`; create mapping rows.
-6. If the count is short, roll back the partial claim and in a separate explicit
-   resolution transaction record `out_of_stock`, audit, and refund/review intent.
-7. Record `delivering` and insert unique `order.delivery_requested` outbox row.
-8. Mark event processed and commit.
+6. The exact-set SQL updates zero rows when the count is short. Preserve the
+   confirmed external payment, move the order to `out_of_stock`, create a review
+   case, and mark the event review in this same transaction.
+7. On success, insert the unique payment allocation and stop at `reserving`.
+8. Mark the event completed and commit.
 
-The normal path commits no external side effect. A crash after commit leaves the
-outbox row for any worker.
+The normal path commits no external side effect. Delivery/outbox creation is
+intentionally deferred to Phase 7.
 
 ## Wallet payment/top-up
 
 Lock `wallet_accounts FOR UPDATE`, look up the unique ledger idempotency key,
 calculate the new `int64` balance with overflow checks, reject negative result,
 update the materialized balance, and append the immutable ledger row in one
-transaction. Wallet order payment then enters the same inventory/outbox path as
-provider payment. Provider top-up event and credit ledger row commit together.
+transaction. Wallet order payment claims exact inventory before debit; any
+short claim rolls back the entire transaction. Debit, payment/allocation,
+history, mappings, and Telegram receipt then commit together. Provider top-up
+payment, allocation, cached credit, ledger row, and intent status commit together.
 
 ## Outbox claim and external call
 

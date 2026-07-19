@@ -1,6 +1,6 @@
 # Implemented PostgreSQL schema
 
-The implemented schema spans goose migrations `00001` through `00016`.
+The implemented schema spans goose migrations `00001` through `00017`.
 Business rows use `bigint GENERATED ALWAYS AS IDENTITY`; Telegram identifiers
 remain external `bigint` values. This keeps joins and queue indexes compact while
 supporting Telegram's signed 64-bit identifier range.
@@ -43,6 +43,7 @@ supporting Telegram's signed 64-bit identifier range.
 | `00014_telegram_phase3` | durable Telegram receipts and audit correlation |
 | `00015_encrypted_inventory` | AES-GCM envelope metadata and reservation history |
 | `00016_orders_banks_vietqr` | encrypted bank envelope metadata and immutable order bank snapshots |
+| `00017_payments_wallet_phase6` | durable payment processing, allocations, reviews, and wallet top-up intents |
 
 Each file has a dependency-safe `Down` section. Integration tests prove the
 full `up -> down-to-zero -> up` cycle in an isolated schema.
@@ -124,19 +125,32 @@ return redacted metadata only.
 ## Payments and wallet
 
 `payments` supports order, wallet top-up, and refund purposes. Amounts are
-positive VND. `(provider, payment_reference)` is unique, and a partial unique
-index on `(provider, provider_transaction_id)` prevents one provider transfer
-from being applied twice. Confirmed payments require `confirmed_at`.
+positive VND. A partial unique index on `(provider, provider_transaction_id)`
+prevents one provider transfer from being applied twice. Multiple genuine
+transfers may share an order reference; only one may win the unique target
+allocation. Confirmed payments require `confirmed_at`, and `occurred_at`
+preserves provider/manual evidence time.
 
 `payment_events` uses unique `(provider, external_event_id)` as its replay
-guard. It stores a 32-byte payload hash, sanitized JSON object, signature result,
-and constrained processing state; no webhook secret or raw sensitive payload is
-stored.
+guard. It stores a 32-byte payload hash, sanitized JSON object, attempts,
+next-attempt time, processing lease timestamps, related target, and constrained
+`received/processing/completed/review/failed` state. No webhook secret,
+signature, or raw sensitive payload is stored.
+
+`payment_allocations` is append-only and gives each accepted payment exactly
+one `order` or `wallet_topup` target while a target unique constraint prevents
+double settlement. `payment_review_cases` durably retains unmatched, mismatch,
+late, cancelled, competing, transaction-conflict, expired-top-up, and
+post-payment out-of-stock evidence with audited operator resolution.
 
 `wallet_accounts` has one non-negative materialized balance per user. The
 append-only ledger remains the audit source. Ledger idempotency is scoped to
 `(account_id, idempotency_key)` so independent accounts may use the same
 external key without collision.
+
+`wallet_topup_intents` has unique payment reference and per-user idempotency,
+bounded positive VND amount, expiry/version, status, and an immutable encrypted
+bank instruction snapshot. No ledger credit exists before exact payment acceptance.
 
 ## Durable work and operations
 

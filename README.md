@@ -6,24 +6,25 @@ as a Go modular monolith. The reference repository defines the Telegram product
 experience; this repository redesigns persistence, transactions, concurrency,
 idempotency, auditability, and recovery around PostgreSQL.
 
-Current status: **Phase 5 ordering and VietQR instructions complete**. The API
+Current status: **Phase 6 payment acceptance and wallet complete**. The API
 accepts secret-verified Telegram webhooks through Gin, durably deduplicates
 updates, serves the active catalog, and provides PostgreSQL-backed, audited
 category/product and redacted inventory administration. Authenticated
 application-layer encryption, atomic inventory claim/release, and conservative
 reservation recovery, atomic pending-order creation, ownership-safe history and
 cancellation, encrypted bank administration, VietQR instructions, and the
-order-expiry worker are implemented. Payment acceptance, inventory reservation
-after payment, delivery, refund, broadcast, and Google Sheet workflows remain
-disabled.
+order-expiry worker are implemented. Phase 6 adds signed durable payment-event
+ingestion, exact reconciliation, manual confirmation, atomic post-payment
+inventory claims, review cases, wallet top-ups, and wallet order payment.
+Delivery, bank-refund execution, broadcast, and Google Sheet workflows remain disabled.
 
 ## Architecture
 
 The deployable image contains three commands:
 
 - `api`: Gin HTTP server for health, metrics, and the Telegram webhook.
-- `worker`: cancellable background runner with the Phase 5 pending-order expiry
-  job; outbox, delivery, broadcast, and Sheet jobs are added later.
+- `worker`: cancellable background runner with pending-order expiry and durable
+  payment-event jobs; delivery, broadcast, and Sheet jobs are added later.
 - `migrate`: goose migration runner.
 
 ```text
@@ -31,6 +32,13 @@ Telegram -> Gin webhook -> update router -> application service -> PostgreSQL
                                                         commit |
                                                                v
                                              Telegram client -> Bot API
+```
+
+Payment callbacks follow a separate durable boundary:
+
+```text
+POST /webhooks/payments/:provider -> verify raw-body signature -> payment_events
+payment worker -> shared acceptance core -> payment/order/wallet/inventory transaction
 ```
 
 External APIs are never called inside a database transaction. See the
@@ -169,6 +177,11 @@ Customer commands:
 - `/orders`: list only the caller's orders with deterministic pagination.
 - `/order <id>`: open an ownership-scoped order detail. Inline buttons expose
   the same detail and allow an unexpired pending order to be cancelled.
+- `/balance`: lazy-create the caller's wallet and show its integer VND balance.
+- `/nap [amount]`: choose a bounded top-up amount and active bank, then create a
+  unique VietQR instruction. The wallet is credited only after payment acceptance.
+- Pending order detail offers wallet payment. Debit, ledger, exact inventory
+  claim, payment allocation, status history, and Telegram receipt commit atomically.
 - `/support`: show the validated `SUPPORT_CONTACT` value.
 - `/myid`: show the caller's Telegram ID, never an internal database ID.
 
@@ -182,13 +195,15 @@ ciphertext, nonce, or fingerprint. Cancel buttons close the persisted session.
 The bank-account menu lists redacted accounts and uses durable sessions to
 create, edit, activate, or deactivate encrypted account numbers. Catalog,
 inventory, and bank mutations commit safe audit metadata, session completion,
-and update completion atomically.
+and update completion atomically. Phase 6 admin menus also list redacted payment
+reviews, accept a manual payment only with a mandatory transaction ID, resolve
+reviews without network refund, and apply audited wallet adjustments.
 
 Banned/disabled users are denied. Unknown commands get a short menu hint.
 VietQR output is only a transfer instruction. Opening the QR does not confirm a
-payment, change the order to paid, reserve inventory, or deliver a secret.
-There are deliberately no `/checkpay`, payment-confirmation, wallet, top-up, or
-delivery flows in Phase 5.
+payment. Accepted payment reserves exact inventory and stops at `reserving`;
+Phase 6 never decrypts or delivers inventory. There is no `/checkpay`, banking
+refund API, or automatic compatibility with a real bank provider.
 
 ## HTTP endpoints
 
@@ -198,6 +213,7 @@ delivery flows in Phase 5.
 | `GET` | `/health/ready` | Executes a bounded sqlc PostgreSQL health query. |
 | `GET` | `/metrics` | Prometheus HTTP counters and duration histograms. |
 | `POST` | `/webhooks/telegram` | Bounded, secret-verified Telegram update receiver. |
+| `POST` | `/webhooks/payments/:provider` | Allowlisted, signed, durable payment-event ingestion. |
 
 The server sets/request-propagates `X-Request-ID`, uses structured access logs,
 recovers request panics, bounds headers and HTTP timeouts, and drains on
@@ -243,6 +259,20 @@ does not require Telegram tokens, admin IDs, HTTP/webhook settings, VietQR, or
 encryption keys. The migration process requires only `DATABASE_URL` and an optional
 `MIGRATIONS_DIR`.
 
+Payment settings are `PAYMENT_ALLOWED_PROVIDERS`, `PAYMENT_WEBHOOK_BODY_LIMIT`,
+the `PAYMENT_EVENT_*` worker controls, `PAYMENT_STALE_PROCESSING_TIMEOUT`, and
+wallet/top-up limits in `.env.example`. The only included webhook adapter is
+`signed_json`: HMAC-SHA-256 over the raw body plus a signed timestamp checked
+within `SIGNED_JSON_TIMESTAMP_TOLERANCE`. It is disabled unless explicitly
+allowlisted and requires `SIGNED_JSON_WEBHOOK_SECRET` when enabled. It is a
+development/private-integration contract and is not compatible by default with
+Sepay, Casso, PayOS, or any bank API.
+
+Webhook ACK is `202 Accepted` only after durable insertion. Exact duplicates
+also receive `202`; conflicting event IDs receive `409`; signature/replay
+failures receive `401`. Inspect payment review cases through `/admin`. Run the
+worker continuously to process received events.
+
 Back up PostgreSQL with authenticated access controls appropriate to the
 deployment. A backup contains ciphertext rather than plaintext inventory, but
 still exposes operational metadata and remains sensitive. Back up encryption
@@ -256,6 +286,9 @@ without the matching key cannot recover inventory.
 - [Implemented database schema](docs/design/database-schema.md)
 - [Order state machine](docs/design/order-state-machine.md)
 - [Transaction boundaries](docs/design/transaction-boundaries.md)
+- [Payment ingestion and acceptance](docs/design/payment-ingestion.md)
+- [Wallet ledger](docs/design/wallet-ledger.md)
+- [Payment reconciliation](docs/design/payment-reconciliation.md)
 - [Roadmap and risks](docs/design/roadmap-and-risks.md)
 - [Inventory encryption](docs/design/inventory-encryption.md)
 - [Inventory administration security](docs/design/inventory-admin-security.md)
@@ -268,6 +301,7 @@ without the matching key cannot recover inventory.
 - [Phase 3 completion report](docs/phase-3-report.md)
 - [Phase 4 completion report](docs/phase-4-report.md)
 - [Phase 5 completion report](docs/phase-5-report.md)
+- [Phase 6 completion report](docs/phase-6-report.md)
 
 ## Repository layout
 
@@ -294,14 +328,16 @@ created when they gain working behaviour, not as empty skeletons.
 
 ## Current limitations
 
-- Telegram confirmation delivery has no outbox in Phase 5. If sending after a
+- Telegram confirmation delivery has no outbox yet. If sending after a
   successful commit fails, the database operation stays committed and the error
   is logged/measured; a duplicate update does not resend it.
 - Pending orders check current authenticated available inventory but do not
-  reserve it. Multiple pending orders may observe the same stock. Payment
-  acceptance and atomic claim belong to Phase 6.
-- No provider/manual payment confirmation, wallet, refund, automatic delivery,
-  or late-payment reconciliation is implemented.
+  reserve it. Multiple pending orders may observe the same stock; accepted
+  payment later performs an exact atomic claim.
+- The included signed payment adapter is a private/test contract, not an
+  integration with a production payment provider.
+- Review resolution does not call a bank refund API, and no automatic delivery
+  or delivery outbox is implemented.
 - Automatic reservation sweeping is deferred because no payment/delivery
   recovery flow can safely resolve sensitive order states yet.
 - The worker expires overdue pending orders without notifying Telegram.

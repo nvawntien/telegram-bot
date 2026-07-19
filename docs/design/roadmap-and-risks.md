@@ -62,10 +62,13 @@ reserve inventory; VietQR never implies payment acceptance.
 
 ### Phase 6 — payments and wallet
 
+Status: implemented. The signed adapter is private/test-only; a production
+provider adapter and banking refund execution remain explicitly unimplemented.
+
 1. Manual provider and signed webhook provider adapter.
 2. Exact payment reconciliation and event/transaction idempotency.
 3. Wallet accounts, atomic ledger credit/debit, top-up and balance checkout.
-4. Review/refund workflow for late/mismatched/out-of-stock payments.
+4. Review workflow for late/mismatched/out-of-stock payments; no network refund.
 
 Exit: ten duplicate webhooks create one payment effect; wallet cannot go
 negative; every balance change has one idempotent ledger entry.
@@ -113,7 +116,7 @@ Exit: remaining Definition of Done checks and restore drill pass.
 These do not block Phase 1 and should be resolved from provider/business facts,
 not guessed in infrastructure code:
 
-- first automatic payment provider and its signed webhook fixture;
+- first production automatic payment provider and its official webhook contract;
 - exact admin role-to-permission matrix;
 - refund execution mechanism and settlement SLA;
 - Telegram ambiguous-send policy acceptable to the operator;

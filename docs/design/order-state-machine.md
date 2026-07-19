@@ -5,11 +5,11 @@ HTTP handlers, workers, and repositories request a use case; none writes a
 status directly. Every successful transition appends `order_status_history` in
 the same transaction.
 
-Phase 5 creates only `pending_payment` and exposes only
+Order creation creates `pending_payment` and exposes only
 `pending_payment -> cancelled` to a customer. The expiry service alone applies
 `pending_payment -> expired`. `cancelled` and `expired` are terminal for the
-Phase 5 customer flow; the documented `expired -> payment_review` seam is for
-late-payment reconciliation in Phase 6 and is not callable by a customer.
+customer flow. Phase 6 never revives an expired/cancelled order automatically;
+it retains a review case without breaking a terminal transition.
 
 ## States
 
@@ -50,14 +50,15 @@ delivered --> refunded           (explicit exceptional compensation only)
 
 `paid` and `reserving` remain explicit for audit and recovery reasoning even
 when a normal confirmation transaction records both transitions and commits in
-`delivering`. No other transition is allowed.
+`reserving`. `delivering` remains Phase 7-only because it requires a delivery
+outbox row. No other transition is allowed.
 
 ## Guards
 
 - Customer cancellation requires `orders.user_id` to match the authenticated
   Telegram user and current state `pending_payment`.
 - Admin transitions require active admin role/permission and an audit record.
-- Future payment confirmation locks the order and rejects amount/reference mismatch,
+- Payment confirmation locks the order and reviews amount/reference mismatch,
   reused provider transaction IDs, duplicate events, expired instructions, and
   invalid current state.
 - Inventory claim must return exactly the sum of order-item quantities. Partial
@@ -74,8 +75,8 @@ when a normal confirmation transaction records both transitions and commits in
 ## Inventory relationship
 
 - Order creation only checks indicative availability; it does not reserve.
-- Phase 5 never claims or creates an active order-inventory mapping.
-- Future valid payment acceptance claims with `FOR UPDATE SKIP LOCKED`.
+- Order creation never claims or creates an active order-inventory mapping.
+- Valid Phase 6 payment acceptance claims an exact set with `FOR UPDATE SKIP LOCKED`.
 - A reserved item cannot belong to two orders because the row status/reference
   constraint and unique mapping are enforced in PostgreSQL.
 - Delivery failure retains the reservation/mapping. An explicit refund or admin
