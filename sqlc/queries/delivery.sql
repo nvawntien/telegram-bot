@@ -386,7 +386,7 @@ RETURNING *;
 SELECT count(*)
 FROM outbox_events
 WHERE event_type = 'order.delivery_requested'
-  AND status IN ('ambiguous', 'manual_review', 'permanent_failed', 'retryable_failed');
+  AND status IN ('pending', 'processing', 'retryable_failed', 'ambiguous', 'manual_review', 'permanent_failed');
 
 -- name: ListDeliveryReviewJobs :many
 SELECT
@@ -407,10 +407,31 @@ SELECT
 FROM outbox_events AS job
 JOIN order_items AS item ON item.order_id = job.delivery_order_id
 WHERE job.event_type = 'order.delivery_requested'
-  AND job.status IN ('ambiguous', 'manual_review', 'permanent_failed', 'retryable_failed')
+  AND job.status IN ('pending', 'processing', 'retryable_failed', 'ambiguous', 'manual_review', 'permanent_failed')
 ORDER BY job.updated_at DESC, job.id DESC
 OFFSET sqlc.arg(page_offset)::integer
 LIMIT sqlc.arg(page_limit)::integer;
+
+-- name: GetDeliveryReviewJob :one
+SELECT
+    job.id,
+    job.delivery_order_id,
+    job.status,
+    job.attempts,
+    job.max_attempts,
+    job.recipient_chat_id,
+    job.telegram_message_id,
+    job.last_error_code,
+    job.last_error_detail,
+    job.created_at,
+    job.updated_at,
+    job.version,
+    item.product_name,
+    item.quantity
+FROM outbox_events AS job
+JOIN order_items AS item ON item.order_id = job.delivery_order_id
+WHERE job.id = sqlc.arg(id)
+  AND job.event_type = 'order.delivery_requested';
 
 -- name: ListDeliveryAttemptEvents :many
 SELECT *
@@ -422,6 +443,7 @@ ORDER BY attempt_number DESC, id DESC;
 UPDATE outbox_events
 SET status = 'pending',
     next_attempt_at = sqlc.arg(next_attempt_at),
+    max_attempts = GREATEST(max_attempts, attempts + 1),
     completed_at = NULL,
     manual_resolution = 'retry',
     resolution_reason = sqlc.arg(reason),

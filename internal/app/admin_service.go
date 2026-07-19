@@ -27,6 +27,8 @@ const (
 	SessionPaymentManual    = "payment.manual"
 	SessionPaymentReview    = "payment.review"
 	SessionWalletAdjustment = "wallet.adjustment"
+	SessionDeliveryRetry    = "delivery.retry"
+	SessionDeliveryComplete = "delivery.complete"
 )
 
 type AdminRepository interface {
@@ -324,7 +326,8 @@ func validSessionState(state string) bool {
 		SessionProductCreate, SessionProductEdit, SessionProductToggle,
 		SessionInventoryImport, SessionInventoryToggle,
 		SessionBankCreate, SessionBankEdit, SessionBankToggle,
-		SessionPaymentManual, SessionPaymentReview, SessionWalletAdjustment:
+		SessionPaymentManual, SessionPaymentReview, SessionWalletAdjustment,
+		SessionDeliveryRetry, SessionDeliveryComplete:
 		return true
 	default:
 		return false

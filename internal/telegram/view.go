@@ -106,7 +106,7 @@ func OrdersView(page app.OrderPage) (string, Keyboard) {
 	lines := []string{"<b>Đơn hàng của bạn</b>"}
 	rows := make(Keyboard, 0, len(page.Items)+2)
 	for _, order := range page.Items {
-		lines = append(lines, fmt.Sprintf("#%d · %s · %dx %s · %s ₫ · %s", order.ID, Escape(string(order.Status)), order.Quantity, Escape(order.ProductName), formatVND(order.Total.Int64()), order.CreatedAt.Local().Format("02/01 15:04")))
+		lines = append(lines, fmt.Sprintf("#%d · %s · %dx %s · %s ₫ · %s", order.ID, Escape(deliveryStatusLabel(order.Status, order.DeliveryStatus)), order.Quantity, Escape(order.ProductName), formatVND(order.Total.Int64()), order.CreatedAt.Local().Format("02/01 15:04")))
 		rows = append(rows, []Button{{Text: fmt.Sprintf("Đơn #%d", order.ID), Data: fmt.Sprintf("v1:o:v:%d", order.ID)}})
 	}
 	if len(page.Items) == 0 {
@@ -121,7 +121,7 @@ func OrderDetailView(order app.OrderDetail, instruction app.PaymentInstruction) 
 	text := fmt.Sprintf(
 		"<b>Đơn #%d</b>\n%s · số lượng %d\nĐơn giá: %s ₫\nTổng: <b>%s ₫</b>\nTrạng thái: <b>%s</b>\nMã chuyển khoản: <code>%s</code>\nHết hạn: %s",
 		order.ID, Escape(order.Item.Name), order.Item.Quantity, formatVND(order.Item.UnitPrice.Int64()),
-		formatVND(order.Total.Int64()), Escape(string(order.Status)), Escape(order.PaymentReference),
+		formatVND(order.Total.Int64()), Escape(deliveryStatusLabel(order.Status, order.DeliveryStatus)), Escape(order.PaymentReference),
 		order.ExpiresAt.Local().Format("02/01/2006 15:04:05"),
 	)
 	rows := Keyboard{}
@@ -173,6 +173,95 @@ func AdminMenu() (string, Keyboard) {
 		{{Text: "Payment reviews", Data: "v1:a:pr:0"}},
 		{{Text: "Manual confirm", Data: "v1:a:pm"}},
 		{{Text: "Điều chỉnh ví", Data: "v1:a:wa"}},
+		{{Text: "Delivery queue", Data: "v1:a:dl:0"}},
+		{{Text: "Delivery reconciliation", Data: "v1:a:dx"}},
+	}
+}
+
+func DeliveryReviewsView(page app.DeliveryReviewPage) (string, Keyboard) {
+	lines := []string{"<b>Delivery queue</b>"}
+	rows := Keyboard{}
+	for _, item := range page.Items {
+		lines = append(lines, fmt.Sprintf("Job #%d · đơn #%d · %s · %d/%d attempts · %dx %s", item.ID, item.OrderID, Escape(item.Status), item.Attempts, item.MaxAttempts, item.Quantity, Escape(item.ProductName)))
+		rows = append(rows, []Button{{Text: fmt.Sprintf("Delivery #%d", item.ID), Data: fmt.Sprintf("v1:a:dd:%d", item.ID)}})
+	}
+	if len(page.Items) == 0 {
+		lines = append(lines, "Không có delivery job cần hiển thị.")
+	}
+	rows = append(rows, navigationRows("v1:a:dl:%d", page.Page)...)
+	rows = append(rows, []Button{{Text: "⬅️ Admin", Data: "v1:m"}})
+	return strings.Join(lines, "\n"), rows
+}
+
+func DeliveryDetailView(detail app.DeliveryReviewDetail) (string, Keyboard) {
+	item := detail.DeliveryReviewItem
+	lines := []string{
+		fmt.Sprintf("<b>Delivery #%d</b>", item.ID),
+		fmt.Sprintf("Đơn #%d · chat <code>%d</code>", item.OrderID, item.RecipientChatID),
+		fmt.Sprintf("%dx %s", item.Quantity, Escape(item.ProductName)),
+		fmt.Sprintf("Trạng thái: <b>%s</b> · attempt %d/%d · version %d", Escape(item.Status), item.Attempts, item.MaxAttempts, item.Version),
+	}
+	if item.TelegramMessageID > 0 {
+		lines = append(lines, fmt.Sprintf("Telegram message ID: <code>%d</code>", item.TelegramMessageID))
+	}
+	if item.ErrorCode != "" {
+		lines = append(lines, "Lỗi: <code>"+Escape(item.ErrorCode)+"</code> · "+Escape(item.ErrorDetail))
+	}
+	lines = append(lines, "", "<b>Attempt history</b>")
+	for _, attempt := range detail.AttemptsHistory {
+		line := fmt.Sprintf("#%d · %s", attempt.Number, Escape(attempt.Status))
+		if attempt.ErrorCode != "" {
+			line += " · " + Escape(attempt.ErrorCode)
+		}
+		if attempt.TelegramMessageID > 0 {
+			line += fmt.Sprintf(" · message %d", attempt.TelegramMessageID)
+		}
+		lines = append(lines, line)
+	}
+	if len(detail.AttemptsHistory) == 0 {
+		lines = append(lines, "Chưa có attempt.")
+	}
+	rows := Keyboard{}
+	switch item.Status {
+	case "retryable_failed", "permanent_failed", "ambiguous", "manual_review":
+		rows = append(rows, []Button{{Text: "Verified not delivered → retry", Data: fmt.Sprintf("v1:a:dr:%d:%d", item.ID, item.Version)}})
+	}
+	if item.Status == "ambiguous" || item.Status == "manual_review" {
+		rows = append(rows, []Button{{Text: "Verified delivered", Data: fmt.Sprintf("v1:a:dm:%d:%d", item.ID, item.Version)}})
+	}
+	rows = append(rows, []Button{{Text: "⬅️ Delivery queue", Data: "v1:a:dl:0"}})
+	return strings.Join(lines, "\n"), rows
+}
+
+func DeliveryReconciliationView(report app.DeliveryReconciliation) (string, Keyboard) {
+	text := fmt.Sprintf("<b>Delivery reconciliation</b>\nClean: <b>%t</b>\nDelivering without job: %d\nActive job / wrong order: %d\nCompleted job / order not delivered: %d\nDelivered inventory mismatch: %d\nSold without completed job: %d\nDelivered with reserved inventory: %d\nMultiple active jobs: %d\nStale processing: %d\nAmbiguous without review: %d\nSuccess evidence not completed: %d", report.Clean(), report.DeliveringWithoutJob, report.ActiveJobWrongOrderState, report.CompletedJobOrderNotDelivered, report.DeliveredInventoryMismatch, report.SoldWithoutCompletedJob, report.DeliveredOrderReservedInventory, report.MultipleActiveJobs, report.StaleProcessing, report.AmbiguousWithoutReview, report.SuccessEvidenceNotCompleted)
+	return text, Keyboard{{{Text: "⬅️ Admin", Data: "v1:m"}}}
+}
+
+func deliveryStatusLabel(status domain.OrderStatus, deliveryStatus string) string {
+	switch deliveryStatus {
+	case "ambiguous", "manual_review":
+		return "giao hàng đang được kiểm tra"
+	case "permanent_failed":
+		return "giao hàng thất bại"
+	case "pending", "processing", "retryable_failed":
+		return "đang giao hàng"
+	case "completed":
+		return "đã giao hàng"
+	}
+	switch status {
+	case domain.OrderStatusReserving:
+		return "đang chuẩn bị giao hàng"
+	case domain.OrderStatusDelivering:
+		return "đang giao hàng"
+	case domain.OrderStatusDelivered:
+		return "đã giao hàng"
+	case domain.OrderStatusDeliveryFailed:
+		return "giao hàng thất bại"
+	case domain.OrderStatusPendingPayment:
+		return "đang chờ thanh toán"
+	default:
+		return string(status)
 	}
 }
 

@@ -307,6 +307,7 @@ type OrderSummary struct {
 	CreatedAt        time.Time
 	ProductName      string
 	Quantity         int32
+	DeliveryStatus   string
 }
 
 type OrderPage struct {
@@ -334,6 +335,7 @@ type OrderDetail struct {
 	BankAccountLast4 string
 	BankProtected    ProtectedBankAccountNumber
 	Item             OrderItemSnapshot
+	DeliveryStatus   string
 }
 
 type PaymentInstructionRequest struct {

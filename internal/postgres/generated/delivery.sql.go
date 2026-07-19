@@ -263,7 +263,7 @@ const countDeliveryReviewJobs = `-- name: CountDeliveryReviewJobs :one
 SELECT count(*)
 FROM outbox_events
 WHERE event_type = 'order.delivery_requested'
-  AND status IN ('ambiguous', 'manual_review', 'permanent_failed', 'retryable_failed')
+  AND status IN ('pending', 'processing', 'retryable_failed', 'ambiguous', 'manual_review', 'permanent_failed')
 `
 
 func (q *Queries) CountDeliveryReviewJobs(ctx context.Context) (int64, error) {
@@ -329,6 +329,67 @@ func (q *Queries) GetDeliveryJobByOrder(ctx context.Context, orderID pgtype.Int8
 		&i.ResolvedByAdminID,
 		&i.ResolvedAt,
 		&i.Version,
+	)
+	return i, err
+}
+
+const getDeliveryReviewJob = `-- name: GetDeliveryReviewJob :one
+SELECT
+    job.id,
+    job.delivery_order_id,
+    job.status,
+    job.attempts,
+    job.max_attempts,
+    job.recipient_chat_id,
+    job.telegram_message_id,
+    job.last_error_code,
+    job.last_error_detail,
+    job.created_at,
+    job.updated_at,
+    job.version,
+    item.product_name,
+    item.quantity
+FROM outbox_events AS job
+JOIN order_items AS item ON item.order_id = job.delivery_order_id
+WHERE job.id = $1
+  AND job.event_type = 'order.delivery_requested'
+`
+
+type GetDeliveryReviewJobRow struct {
+	ID                int64              `db:"id" json:"id"`
+	DeliveryOrderID   pgtype.Int8        `db:"delivery_order_id" json:"delivery_order_id"`
+	Status            string             `db:"status" json:"status"`
+	Attempts          int32              `db:"attempts" json:"attempts"`
+	MaxAttempts       int32              `db:"max_attempts" json:"max_attempts"`
+	RecipientChatID   pgtype.Int8        `db:"recipient_chat_id" json:"recipient_chat_id"`
+	TelegramMessageID pgtype.Int8        `db:"telegram_message_id" json:"telegram_message_id"`
+	LastErrorCode     pgtype.Text        `db:"last_error_code" json:"last_error_code"`
+	LastErrorDetail   pgtype.Text        `db:"last_error_detail" json:"last_error_detail"`
+	CreatedAt         pgtype.Timestamptz `db:"created_at" json:"created_at"`
+	UpdatedAt         pgtype.Timestamptz `db:"updated_at" json:"updated_at"`
+	Version           int64              `db:"version" json:"version"`
+	ProductName       string             `db:"product_name" json:"product_name"`
+	Quantity          int32              `db:"quantity" json:"quantity"`
+}
+
+func (q *Queries) GetDeliveryReviewJob(ctx context.Context, id int64) (GetDeliveryReviewJobRow, error) {
+	row := q.db.QueryRow(ctx, getDeliveryReviewJob, id)
+	var i GetDeliveryReviewJobRow
+	err := row.Scan(
+		&i.ID,
+		&i.DeliveryOrderID,
+		&i.Status,
+		&i.Attempts,
+		&i.MaxAttempts,
+		&i.RecipientChatID,
+		&i.TelegramMessageID,
+		&i.LastErrorCode,
+		&i.LastErrorDetail,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.Version,
+		&i.ProductName,
+		&i.Quantity,
 	)
 	return i, err
 }
@@ -619,7 +680,7 @@ SELECT
 FROM outbox_events AS job
 JOIN order_items AS item ON item.order_id = job.delivery_order_id
 WHERE job.event_type = 'order.delivery_requested'
-  AND job.status IN ('ambiguous', 'manual_review', 'permanent_failed', 'retryable_failed')
+  AND job.status IN ('pending', 'processing', 'retryable_failed', 'ambiguous', 'manual_review', 'permanent_failed')
 ORDER BY job.updated_at DESC, job.id DESC
 OFFSET $1::integer
 LIMIT $2::integer
@@ -1033,6 +1094,7 @@ const manualRetryDeliveryJob = `-- name: ManualRetryDeliveryJob :one
 UPDATE outbox_events
 SET status = 'pending',
     next_attempt_at = $1,
+    max_attempts = GREATEST(max_attempts, attempts + 1),
     completed_at = NULL,
     manual_resolution = 'retry',
     resolution_reason = $2,

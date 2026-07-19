@@ -468,7 +468,7 @@ func (q *Queries) GetOrderByID(ctx context.Context, id int64) (Order, error) {
 const getOrderDetailOwnedByTelegramUser = `-- name: GetOrderDetailOwnedByTelegramUser :one
 SELECT orders.id, orders.user_id, orders.status, orders.currency, orders.subtotal_vnd, orders.total_vnd, orders.payment_reference, orders.idempotency_key, orders.expires_at, orders.paid_at, orders.delivery_started_at, orders.delivered_at, orders.cancelled_at, orders.version, orders.created_at, orders.updated_at, orders.bank_account_id, orders.bank_bin_snapshot, orders.bank_name_snapshot, orders.bank_display_name_snapshot, orders.bank_account_name_snapshot, orders.encrypted_account_number_snapshot, orders.account_number_nonce_snapshot, orders.account_encryption_format_snapshot, orders.account_key_version_snapshot, orders.account_last4_snapshot, item.id AS order_item_id, item.product_id,
        item.product_name, item.unit_price_vnd, item.quantity,
-       item.line_total_vnd
+       item.line_total_vnd, delivery.status AS delivery_status
 FROM orders
 JOIN users ON users.id = orders.user_id
 JOIN LATERAL (
@@ -477,6 +477,9 @@ JOIN LATERAL (
     ORDER BY id
     LIMIT 1
 ) AS item ON true
+LEFT JOIN outbox_events AS delivery
+  ON delivery.event_type = 'order.delivery_requested'
+ AND delivery.delivery_order_id = orders.id
 WHERE orders.id = $1
   AND users.telegram_user_id = $2
 `
@@ -519,6 +522,7 @@ type GetOrderDetailOwnedByTelegramUserRow struct {
 	UnitPriceVnd                    int64              `db:"unit_price_vnd" json:"unit_price_vnd"`
 	Quantity                        int32              `db:"quantity" json:"quantity"`
 	LineTotalVnd                    int64              `db:"line_total_vnd" json:"line_total_vnd"`
+	DeliveryStatus                  pgtype.Text        `db:"delivery_status" json:"delivery_status"`
 }
 
 func (q *Queries) GetOrderDetailOwnedByTelegramUser(ctx context.Context, arg GetOrderDetailOwnedByTelegramUserParams) (GetOrderDetailOwnedByTelegramUserRow, error) {
@@ -557,6 +561,7 @@ func (q *Queries) GetOrderDetailOwnedByTelegramUser(ctx context.Context, arg Get
 		&i.UnitPriceVnd,
 		&i.Quantity,
 		&i.LineTotalVnd,
+		&i.DeliveryStatus,
 	)
 	return i, err
 }
@@ -750,7 +755,8 @@ func (q *Queries) InsertOrderStatusHistory(ctx context.Context, arg InsertOrderS
 const listOrdersOwnedByTelegramUser = `-- name: ListOrdersOwnedByTelegramUser :many
 SELECT orders.id, orders.status, orders.total_vnd, orders.payment_reference,
        orders.expires_at, orders.version, orders.created_at,
-       item.product_name, item.quantity
+       item.product_name, item.quantity,
+       delivery.status AS delivery_status
 FROM orders
 JOIN users ON users.id = orders.user_id
 JOIN LATERAL (
@@ -760,6 +766,9 @@ JOIN LATERAL (
     ORDER BY id
     LIMIT 1
 ) AS item ON true
+LEFT JOIN outbox_events AS delivery
+  ON delivery.event_type = 'order.delivery_requested'
+ AND delivery.delivery_order_id = orders.id
 WHERE users.telegram_user_id = $1
 ORDER BY orders.created_at DESC, orders.id DESC
 LIMIT $3::integer OFFSET $2::integer
@@ -781,6 +790,7 @@ type ListOrdersOwnedByTelegramUserRow struct {
 	CreatedAt        pgtype.Timestamptz `db:"created_at" json:"created_at"`
 	ProductName      string             `db:"product_name" json:"product_name"`
 	Quantity         int32              `db:"quantity" json:"quantity"`
+	DeliveryStatus   pgtype.Text        `db:"delivery_status" json:"delivery_status"`
 }
 
 func (q *Queries) ListOrdersOwnedByTelegramUser(ctx context.Context, arg ListOrdersOwnedByTelegramUserParams) ([]ListOrdersOwnedByTelegramUserRow, error) {
@@ -802,6 +812,7 @@ func (q *Queries) ListOrdersOwnedByTelegramUser(ctx context.Context, arg ListOrd
 			&i.CreatedAt,
 			&i.ProductName,
 			&i.Quantity,
+			&i.DeliveryStatus,
 		); err != nil {
 			return nil, err
 		}

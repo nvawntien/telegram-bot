@@ -99,3 +99,38 @@ func TestWalletViewsKeepFinancialWarningsAndCallbackLimits(t *testing.T) {
 		}
 	}
 }
+
+func TestDeliveryViewsAreRedactedAndBounded(t *testing.T) {
+	secret := fmt.Sprintf("runtime-secret-%d", time.Now().UnixNano())
+	detail := app.DeliveryReviewDetail{
+		DeliveryReviewItem: app.DeliveryReviewItem{
+			ID: 91, OrderID: 44, Status: "ambiguous", Attempts: 1, MaxAttempts: 5,
+			RecipientChatID: 123456, TelegramMessageID: 888, ErrorCode: "response_reset",
+			ErrorDetail: "send outcome requires manual verification", Version: 4,
+			ProductName: "Account <premium>", Quantity: 2,
+		},
+		AttemptsHistory: []app.DeliveryAttemptView{{Number: 1, Status: "ambiguous", ErrorCode: "response_reset"}},
+	}
+	text, keyboard := DeliveryDetailView(detail)
+	if strings.Contains(text, secret) || strings.Contains(text, "<premium>") || !strings.Contains(text, "&lt;premium&gt;") {
+		t.Fatalf("DeliveryDetailView() leaked or failed to escape: %q", text)
+	}
+	for _, row := range keyboard {
+		for _, button := range row {
+			if len(button.Data) > MaxCallbackDataBytes {
+				t.Fatalf("callback exceeds Telegram limit: %q", button.Data)
+			}
+		}
+	}
+}
+
+func TestOrderViewsUseCustomerDeliveryLabels(t *testing.T) {
+	page := app.OrderPage{Items: []app.OrderSummary{{
+		ID: 7, Status: domain.OrderStatusDelivering, DeliveryStatus: "ambiguous",
+		ProductName: "Product", Quantity: 1, CreatedAt: time.Now(),
+	}}}
+	text, _ := OrdersView(page)
+	if !strings.Contains(text, "giao hàng đang được kiểm tra") || strings.Contains(text, "ambiguous") {
+		t.Fatalf("OrdersView() status = %q", text)
+	}
+}

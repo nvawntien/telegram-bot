@@ -102,6 +102,8 @@ func run(ctx context.Context) error {
 	).WithDeliveryMaxAttempts(cfg.DeliveryMaxAttempts)
 	paymentAdminService := app.NewPaymentAdminService(store, cfg.PaymentReviewPageSize, app.DefaultPostPaymentReservationTTL).
 		WithDeliveryMaxAttempts(cfg.DeliveryMaxAttempts)
+	deliveryAdminService := app.NewDeliveryAdminService(store, cfg.DeliveryReviewPageSize).
+		WithProcessingLease(cfg.DeliveryProcessingLease)
 	updateService := app.NewUpdateService(store, cfg.TelegramUpdateStaleAfter)
 	telegramClient, err := telegramadapter.NewClient(
 		cfg.TelegramBotToken, "", cfg.TelegramAPITimeout, 1<<20, telegramMetrics,
@@ -115,7 +117,7 @@ func run(ctx context.Context) error {
 		paymentAdminService,
 		updateService, telegramClient,
 		cfg.SupportContact, logger, telegramMetrics,
-	)
+	).WithDeliveryAdministration(deliveryAdminService)
 	telegramWebhook := httpapi.NewTelegramWebhook(
 		cfg.TelegramWebhookSecret, cfg.TelegramWebhookBodyLimit,
 		cfg.TelegramWebhookTimeout, telegramRouter, telegramMetrics,

@@ -32,11 +32,17 @@ type Router struct {
 	orders         *app.OrderService
 	wallet         *app.WalletService
 	payments       *app.PaymentAdminService
+	deliveries     *app.DeliveryAdminService
 	updates        *app.UpdateService
 	messenger      Messenger
 	supportContact string
 	logger         *slog.Logger
 	metrics        RouterMetrics
+}
+
+func (r *Router) WithDeliveryAdministration(deliveries *app.DeliveryAdminService) *Router {
+	r.deliveries = deliveries
+	return r
 }
 
 func NewRouter(
@@ -440,6 +446,78 @@ func (r *Router) routeCallback(ctx context.Context, telegramID int64, callback C
 			return plan, err
 		}
 		plan.text, plan.keyboard = PaymentReviewsView(page)
+	case CallbackAdminDeliveries:
+		page, err := r.deliveries.List(ctx, telegramID, callback.Page)
+		if err != nil {
+			return plan, err
+		}
+		plan.text, plan.keyboard = DeliveryReviewsView(page)
+	case CallbackAdminDeliveryDetail:
+		detail, err := r.deliveries.Get(ctx, telegramID, callback.DeliveryID)
+		if err != nil {
+			return plan, err
+		}
+		plan.text, plan.keyboard = DeliveryDetailView(detail)
+	case CallbackAdminDeliveryRetry, CallbackAdminDeliveryComplete:
+		state, step := app.SessionDeliveryRetry, "reason"
+		if callback.Action == CallbackAdminDeliveryComplete {
+			state, step = app.SessionDeliveryComplete, "evidence"
+		}
+		session, err := r.admins.StartSession(ctx, telegramID, state, workflowPayload{
+			Step: step, DeliveryID: callback.DeliveryID, RecordVersion: callback.RecordVersion,
+		}, meta)
+		r.observeSession("start", err)
+		if err != nil {
+			return plan, err
+		}
+		if state == app.SessionDeliveryRetry {
+			plan.text = "Chỉ tiếp tục sau khi đã xác minh credential chưa được giao. Gửi lý do/evidence kiểm tra."
+		} else {
+			plan.text = "Gửi Telegram message ID và lý do xác minh theo dạng: message_id|reason"
+		}
+		plan.keyboard, plan.completedByApp = cancelKeyboard(session), true
+	case CallbackAdminDeliveryConfirm:
+		session, err := r.admins.LoadSession(ctx, telegramID)
+		if err != nil {
+			return plan, err
+		}
+		if session.ID != callback.SessionID || session.Version != callback.SessionVersion {
+			return plan, app.ErrStaleVersion
+		}
+		var payload workflowPayload
+		if err := json.Unmarshal(session.Payload, &payload); err != nil {
+			return plan, app.ErrInvalidInput
+		}
+		if payload.Step != "confirm" || payload.DeliveryID <= 0 || payload.RecordVersion <= 0 {
+			return plan, app.ErrStaleVersion
+		}
+		command := app.DeliveryResolutionCommand{
+			AdminTelegramID: telegramID, JobID: payload.DeliveryID, ExpectedVersion: payload.RecordVersion,
+			TelegramMessageID: payload.TelegramMessageID, Reason: payload.Reason, Session: session, Meta: meta,
+		}
+		switch session.State {
+		case app.SessionDeliveryRetry:
+			job, err := r.deliveries.Retry(ctx, command)
+			if err != nil {
+				return plan, err
+			}
+			plan.text = fmt.Sprintf("Delivery #%d đã được xếp lại vào worker queue.", job.ID)
+		case app.SessionDeliveryComplete:
+			job, err := r.deliveries.Complete(ctx, command)
+			if err != nil {
+				return plan, err
+			}
+			plan.text = fmt.Sprintf("Delivery #%d đã được xác nhận delivered từ evidence.", job.ID)
+		default:
+			return plan, app.ErrStaleVersion
+		}
+		plan.keyboard, plan.completedByApp = nil, true
+	case CallbackAdminDeliveryReconcile:
+		report, err := r.deliveries.Reconcile(ctx, telegramID)
+		if err != nil {
+			return plan, err
+		}
+		plan.text, plan.keyboard = DeliveryReconciliationView(report)
 	case CallbackAdminPaymentManual:
 		session, err := r.admins.StartSession(ctx, telegramID, app.SessionPaymentManual, workflowPayload{Step: "payment"}, meta)
 		if err != nil {
@@ -679,22 +757,25 @@ func (r *Router) routeCallback(ctx context.Context, telegramID int64, callback C
 }
 
 type workflowPayload struct {
-	Step            string `json:"step"`
-	CategoryID      int64  `json:"category_id,omitempty"`
-	ProductID       int64  `json:"product_id,omitempty"`
-	RecordVersion   int64  `json:"record_version,omitempty"`
-	InventoryItemID int64  `json:"inventory_item_id,omitempty"`
-	Active          bool   `json:"active,omitempty"`
-	Name            string `json:"name,omitempty"`
-	Description     string `json:"description,omitempty"`
-	SortOrder       int32  `json:"sort_order,omitempty"`
-	PriceVND        int64  `json:"price_vnd,omitempty"`
-	BankAccountID   int64  `json:"bank_account_id,omitempty"`
-	ReviewID        int64  `json:"review_id,omitempty"`
-	BankBIN         string `json:"bank_bin,omitempty"`
-	BankName        string `json:"bank_name,omitempty"`
-	DisplayName     string `json:"display_name,omitempty"`
-	AccountName     string `json:"account_name,omitempty"`
+	Step              string `json:"step"`
+	CategoryID        int64  `json:"category_id,omitempty"`
+	ProductID         int64  `json:"product_id,omitempty"`
+	RecordVersion     int64  `json:"record_version,omitempty"`
+	InventoryItemID   int64  `json:"inventory_item_id,omitempty"`
+	Active            bool   `json:"active,omitempty"`
+	Name              string `json:"name,omitempty"`
+	Description       string `json:"description,omitempty"`
+	SortOrder         int32  `json:"sort_order,omitempty"`
+	PriceVND          int64  `json:"price_vnd,omitempty"`
+	BankAccountID     int64  `json:"bank_account_id,omitempty"`
+	ReviewID          int64  `json:"review_id,omitempty"`
+	BankBIN           string `json:"bank_bin,omitempty"`
+	BankName          string `json:"bank_name,omitempty"`
+	DisplayName       string `json:"display_name,omitempty"`
+	AccountName       string `json:"account_name,omitempty"`
+	DeliveryID        int64  `json:"delivery_id,omitempty"`
+	TelegramMessageID int64  `json:"telegram_message_id,omitempty"`
+	Reason            string `json:"reason,omitempty"`
 }
 
 func (r *Router) handleSessionText(ctx context.Context, updateID int64, requestID string, message *models.Message, session app.AdminSession) (responsePlan, error) {
@@ -706,6 +787,43 @@ func (r *Router) handleSessionText(ctx context.Context, updateID int64, requestI
 	meta := app.RequestMeta{RequestID: requestID, UpdateID: updateID}
 	plan := responsePlan{chatID: message.Chat.ID, completedByApp: true}
 	switch session.State {
+	case app.SessionDeliveryRetry, app.SessionDeliveryComplete:
+		if payload.DeliveryID <= 0 || payload.RecordVersion <= 0 || payload.Step == "confirm" {
+			return responsePlan{}, app.ErrStaleVersion
+		}
+		if session.State == app.SessionDeliveryRetry {
+			if payload.Step != "reason" || text == "" || len([]rune(text)) > 1000 {
+				return responsePlan{}, app.ErrInvalidInput
+			}
+			payload.Reason = text
+		} else {
+			parts := strings.SplitN(text, "|", 2)
+			if payload.Step != "evidence" || len(parts) != 2 {
+				return responsePlan{}, app.ErrInvalidInput
+			}
+			messageID, err := strconv.ParseInt(strings.TrimSpace(parts[0]), 10, 64)
+			reason := strings.TrimSpace(parts[1])
+			if err != nil || messageID <= 0 || reason == "" || len([]rune(reason)) > 1000 {
+				return responsePlan{}, app.ErrInvalidInput
+			}
+			payload.TelegramMessageID, payload.Reason = messageID, reason
+		}
+		payload.Step = "confirm"
+		next, err := r.admins.AdvanceSession(ctx, message.From.ID, session, session.State, payload, meta)
+		r.observeSession("advance", err)
+		if err != nil {
+			return responsePlan{}, err
+		}
+		label := "Xác nhận credential chưa được giao và cho worker retry"
+		if session.State == app.SessionDeliveryComplete {
+			label = "Xác nhận evidence và mark delivered"
+		}
+		plan.text = "<b>Xác nhận thao tác nhạy cảm</b>\nDelivery job sẽ được khóa và kiểm tra lại version/state trong transaction."
+		plan.keyboard = Keyboard{
+			{{Text: label, Data: fmt.Sprintf("v1:a:dc:%d:%d", next.ID, next.Version)}},
+			{{Text: "Hủy", Data: fmt.Sprintf("v1:a:x:%d:%d", next.ID, next.Version)}},
+		}
+		return plan, nil
 	case app.SessionInventoryImport:
 		if payload.Step != "payload" || payload.ProductID <= 0 {
 			return responsePlan{}, app.ErrStaleVersion

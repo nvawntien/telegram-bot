@@ -192,7 +192,7 @@ func (s *AppStore) ListOrdersOwnedByTelegramUser(ctx context.Context, telegramID
 			ID: row.ID, Status: domain.OrderStatus(row.Status), Total: domain.Money(row.TotalVnd),
 			PaymentReference: row.PaymentReference, ExpiresAt: row.ExpiresAt.Time,
 			Version: row.Version, CreatedAt: row.CreatedAt.Time,
-			ProductName: row.ProductName, Quantity: row.Quantity,
+			ProductName: row.ProductName, Quantity: row.Quantity, DeliveryStatus: row.DeliveryStatus.String,
 		})
 	}
 	return items, total, nil
@@ -269,6 +269,7 @@ func mapOwnedOrderDetail(row generated.GetOrderDetailOwnedByTelegramUserRow) app
 		AccountKeyVersionSnapshot:       row.AccountKeyVersionSnapshot, AccountLast4Snapshot: row.AccountLast4Snapshot,
 	})
 	order.Item = app.OrderItemSnapshot{ID: row.OrderItemID, ProductID: row.ProductID, Name: row.ProductName, UnitPrice: domain.Money(row.UnitPriceVnd), Quantity: row.Quantity, LineTotal: domain.Money(row.LineTotalVnd)}
+	order.DeliveryStatus = row.DeliveryStatus.String
 	return order
 }
 

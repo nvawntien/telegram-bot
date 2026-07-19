@@ -98,7 +98,8 @@ WHERE users.telegram_user_id = sqlc.arg(telegram_user_id);
 -- name: ListOrdersOwnedByTelegramUser :many
 SELECT orders.id, orders.status, orders.total_vnd, orders.payment_reference,
        orders.expires_at, orders.version, orders.created_at,
-       item.product_name, item.quantity
+       item.product_name, item.quantity,
+       delivery.status AS delivery_status
 FROM orders
 JOIN users ON users.id = orders.user_id
 JOIN LATERAL (
@@ -108,6 +109,9 @@ JOIN LATERAL (
     ORDER BY id
     LIMIT 1
 ) AS item ON true
+LEFT JOIN outbox_events AS delivery
+  ON delivery.event_type = 'order.delivery_requested'
+ AND delivery.delivery_order_id = orders.id
 WHERE users.telegram_user_id = sqlc.arg(telegram_user_id)
 ORDER BY orders.created_at DESC, orders.id DESC
 LIMIT sqlc.arg(page_limit)::integer OFFSET sqlc.arg(page_offset)::integer;
@@ -115,7 +119,7 @@ LIMIT sqlc.arg(page_limit)::integer OFFSET sqlc.arg(page_offset)::integer;
 -- name: GetOrderDetailOwnedByTelegramUser :one
 SELECT orders.*, item.id AS order_item_id, item.product_id,
        item.product_name, item.unit_price_vnd, item.quantity,
-       item.line_total_vnd
+       item.line_total_vnd, delivery.status AS delivery_status
 FROM orders
 JOIN users ON users.id = orders.user_id
 JOIN LATERAL (
@@ -124,6 +128,9 @@ JOIN LATERAL (
     ORDER BY id
     LIMIT 1
 ) AS item ON true
+LEFT JOIN outbox_events AS delivery
+  ON delivery.event_type = 'order.delivery_requested'
+ AND delivery.delivery_order_id = orders.id
 WHERE orders.id = sqlc.arg(order_id)
   AND users.telegram_user_id = sqlc.arg(telegram_user_id);
 

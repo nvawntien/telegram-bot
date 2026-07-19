@@ -82,6 +82,12 @@ const (
 	CallbackAdminPaymentManual      CallbackAction = "admin_payment_manual"
 	CallbackAdminPaymentResolve     CallbackAction = "admin_payment_resolve"
 	CallbackAdminWalletAdjustment   CallbackAction = "admin_wallet_adjustment"
+	CallbackAdminDeliveries         CallbackAction = "admin_deliveries"
+	CallbackAdminDeliveryDetail     CallbackAction = "admin_delivery_detail"
+	CallbackAdminDeliveryRetry      CallbackAction = "admin_delivery_retry"
+	CallbackAdminDeliveryComplete   CallbackAction = "admin_delivery_complete"
+	CallbackAdminDeliveryConfirm    CallbackAction = "admin_delivery_confirm"
+	CallbackAdminDeliveryReconcile  CallbackAction = "admin_delivery_reconcile"
 	CallbackAdminCancel             CallbackAction = "admin_cancel"
 )
 
@@ -101,6 +107,7 @@ type Callback struct {
 	Active         bool
 	AmountVND      int64
 	ReviewID       int64
+	DeliveryID     int64
 }
 
 func ParseCallback(data string) (Callback, error) {
@@ -282,6 +289,41 @@ func parseAdminCallback(parts []string) (Callback, error) {
 		return Callback{}, ErrInvalidCallback
 	}
 	switch parts[2] {
+	case "dl":
+		page, err := parseNonNegative(parts, 3, 4)
+		return Callback{Action: CallbackAdminDeliveries, Page: int(page)}, err
+	case "dd":
+		if len(parts) != 4 {
+			return Callback{}, ErrInvalidCallback
+		}
+		jobID, err := positive(parts[3])
+		return Callback{Action: CallbackAdminDeliveryDetail, DeliveryID: jobID}, err
+	case "dr", "dm":
+		if len(parts) != 5 {
+			return Callback{}, ErrInvalidCallback
+		}
+		jobID, err := positive(parts[3])
+		if err != nil {
+			return Callback{}, err
+		}
+		version, err := positive(parts[4])
+		action := CallbackAdminDeliveryRetry
+		if parts[2] == "dm" {
+			action = CallbackAdminDeliveryComplete
+		}
+		return Callback{Action: action, DeliveryID: jobID, RecordVersion: version}, err
+	case "dc":
+		if len(parts) != 5 {
+			return Callback{}, ErrInvalidCallback
+		}
+		sessionID, err := positive(parts[3])
+		if err != nil {
+			return Callback{}, err
+		}
+		sessionVersion, err := positive(parts[4])
+		return Callback{Action: CallbackAdminDeliveryConfirm, SessionID: sessionID, SessionVersion: sessionVersion}, err
+	case "dx":
+		return exact(parts, 3, Callback{Action: CallbackAdminDeliveryReconcile})
 	case "pm":
 		return exact(parts, 3, Callback{Action: CallbackAdminPaymentManual})
 	case "pr":
