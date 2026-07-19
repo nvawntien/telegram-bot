@@ -113,6 +113,7 @@ type Querier interface {
 	LockWalletAccount(ctx context.Context, id int64) (WalletAccount, error)
 	LockWalletTopupByReference(ctx context.Context, paymentReference string) (WalletTopupIntent, error)
 	MarkOrderInventoryMappingsReleased(ctx context.Context, arg MarkOrderInventoryMappingsReleasedParams) (int64, error)
+	MarkOrderPaidGuarded(ctx context.Context, arg MarkOrderPaidGuardedParams) (Order, error)
 	MarkOutboxEventCompleted(ctx context.Context, arg MarkOutboxEventCompletedParams) (OutboxEvent, error)
 	MarkWalletTopupCredited(ctx context.Context, arg MarkWalletTopupCreditedParams) (WalletTopupIntent, error)
 	MarkWalletTopupReview(ctx context.Context, id int64) (WalletTopupIntent, error)

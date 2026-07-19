@@ -218,6 +218,12 @@ WHERE id = sqlc.arg(id)
   AND version = sqlc.arg(expected_version)
 RETURNING *;
 
+-- name: MarkOrderPaidGuarded :one
+UPDATE orders
+SET status = 'paid', paid_at = sqlc.arg(paid_at), version = version + 1
+WHERE id = sqlc.arg(id) AND status = 'pending_payment' AND version = sqlc.arg(expected_version)
+RETURNING *;
+
 -- name: InsertOrderStatusHistory :one
 INSERT INTO order_status_history (
     order_id,

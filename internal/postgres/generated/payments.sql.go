@@ -303,6 +303,9 @@ INSERT INTO payments (
     $9,
     $10
 )
+ON CONFLICT (provider, provider_transaction_id)
+WHERE provider_transaction_id IS NOT NULL
+DO NOTHING
 RETURNING id, order_id, user_id, purpose, provider, provider_transaction_id, payment_reference, amount_vnd, currency, status, confirmed_at, created_at, updated_at, occurred_at
 `
 

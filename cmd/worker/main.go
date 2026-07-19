@@ -49,9 +49,15 @@ func run(ctx context.Context) error {
 	store := postgres.NewAppStore(pool)
 	expiryService := app.NewOrderExpiryService(store, cfg.OrderExpiryBatchSize)
 	expiryMetrics := observability.NewOrderExpiryMetrics(prometheus.DefaultRegisterer)
+	paymentMetrics := observability.NewPaymentMetrics(prometheus.DefaultRegisterer)
+	paymentAcceptance := app.NewPaymentAcceptanceService(store, app.DefaultPostPaymentReservationTTL, paymentMetrics)
+	paymentEvents := app.NewPaymentEventJob(
+		store, paymentAcceptance, cfg.PaymentEventBatchSize,
+		cfg.PaymentEventRetryBase, cfg.PaymentStaleProcessingTimeout,
+	)
 	runner := worker.NewRunner(
 		postgres.NewChecker(pool, cfg.DatabaseHealthTimeout), expiryService, logger,
 		30*time.Second, cfg.OrderExpiryInterval, cfg.OrderExpiryRunTimeout, expiryMetrics,
-	)
+	).WithPaymentEvents(paymentEvents, cfg.PaymentEventPollInterval, cfg.PaymentEventRunTimeout, paymentMetrics)
 	return runner.Run(ctx)
 }

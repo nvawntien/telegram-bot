@@ -1061,6 +1061,53 @@ func (q *Queries) LockUserForOrderCreation(ctx context.Context, telegramUserID i
 	return i, err
 }
 
+const markOrderPaidGuarded = `-- name: MarkOrderPaidGuarded :one
+UPDATE orders
+SET status = 'paid', paid_at = $1, version = version + 1
+WHERE id = $2 AND status = 'pending_payment' AND version = $3
+RETURNING id, user_id, status, currency, subtotal_vnd, total_vnd, payment_reference, idempotency_key, expires_at, paid_at, delivery_started_at, delivered_at, cancelled_at, version, created_at, updated_at, bank_account_id, bank_bin_snapshot, bank_name_snapshot, bank_display_name_snapshot, bank_account_name_snapshot, encrypted_account_number_snapshot, account_number_nonce_snapshot, account_encryption_format_snapshot, account_key_version_snapshot, account_last4_snapshot
+`
+
+type MarkOrderPaidGuardedParams struct {
+	PaidAt          pgtype.Timestamptz `db:"paid_at" json:"paid_at"`
+	ID              int64              `db:"id" json:"id"`
+	ExpectedVersion int64              `db:"expected_version" json:"expected_version"`
+}
+
+func (q *Queries) MarkOrderPaidGuarded(ctx context.Context, arg MarkOrderPaidGuardedParams) (Order, error) {
+	row := q.db.QueryRow(ctx, markOrderPaidGuarded, arg.PaidAt, arg.ID, arg.ExpectedVersion)
+	var i Order
+	err := row.Scan(
+		&i.ID,
+		&i.UserID,
+		&i.Status,
+		&i.Currency,
+		&i.SubtotalVnd,
+		&i.TotalVnd,
+		&i.PaymentReference,
+		&i.IdempotencyKey,
+		&i.ExpiresAt,
+		&i.PaidAt,
+		&i.DeliveryStartedAt,
+		&i.DeliveredAt,
+		&i.CancelledAt,
+		&i.Version,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.BankAccountID,
+		&i.BankBinSnapshot,
+		&i.BankNameSnapshot,
+		&i.BankDisplayNameSnapshot,
+		&i.BankAccountNameSnapshot,
+		&i.EncryptedAccountNumberSnapshot,
+		&i.AccountNumberNonceSnapshot,
+		&i.AccountEncryptionFormatSnapshot,
+		&i.AccountKeyVersionSnapshot,
+		&i.AccountLast4Snapshot,
+	)
+	return i, err
+}
+
 const updateOrderStatusGuarded = `-- name: UpdateOrderStatusGuarded :one
 UPDATE orders
 SET status = $1,

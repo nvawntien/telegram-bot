@@ -106,6 +106,9 @@ INSERT INTO payments (
     sqlc.narg(confirmed_at),
     sqlc.arg(occurred_at)
 )
+ON CONFLICT (provider, provider_transaction_id)
+WHERE provider_transaction_id IS NOT NULL
+DO NOTHING
 RETURNING *;
 
 -- name: GetPaymentByProviderTransaction :one
