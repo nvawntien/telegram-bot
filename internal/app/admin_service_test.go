@@ -46,7 +46,8 @@ func TestParseMoneyInput(t *testing.T) {
 }
 
 func TestSessionStatesAndAuditSnapshots(t *testing.T) {
-	if !validSessionState(SessionCategoryCreate) || validSessionState("payment.create") {
+	if !validSessionState(SessionCategoryCreate) || !validSessionState(SessionInventoryImport) ||
+		!validSessionState(SessionInventoryToggle) || validSessionState("payment.create") {
 		t.Fatal("session state validation mismatch")
 	}
 	payload, err := encodePayload(map[string]int64{"category_id": 12})
