@@ -38,13 +38,21 @@ func acceptPaymentWithinTransaction(ctx context.Context, queries *generated.Quer
 	}
 
 	existing, err := queries.GetPaymentByProviderTransaction(ctx, generated.GetPaymentByProviderTransactionParams{
-		Provider: command.Provider, ProviderTransactionID: optionalText(command.ProviderTransactionID),
+		Provider: command.Provider, PaymentEnvironment: command.Environment,
+		ProviderTransactionID: optionalText(command.ProviderTransactionID),
 	})
 	if err == nil {
 		return handleExistingPayment(ctx, queries, command, existing, acceptedAt, result)
 	}
 	if !errors.Is(err, pgx.ErrNoRows) {
 		return err
+	}
+	targetCount, err := queries.CountPaymentReferenceTargets(ctx, command.Reference)
+	if err != nil {
+		return err
+	}
+	if targetCount > 1 {
+		return recordPaymentReview(ctx, queries, command, nil, 0, "provider_ambiguous_reference", acceptedAt, result)
 	}
 
 	order, err := queries.LockOrderByPaymentReference(ctx, command.Reference)
@@ -65,6 +73,10 @@ func acceptPaymentWithinTransaction(ctx context.Context, queries *generated.Quer
 	result.OrderID = order.ID
 
 	reviewReason := orderReviewReason(order, command, acceptedAt)
+	if reviewReason == "" && (order.PaymentEnvironment != command.Environment ||
+		(command.ProviderAccountMappingID > 0 && (!order.BankAccountID.Valid || order.BankAccountID.Int64 != command.LocalBankAccountID))) {
+		reviewReason = "provider_destination_account_mismatch"
+	}
 	if reviewReason != "" {
 		payment, err := insertOrderPayment(ctx, queries, command, order, "review", acceptedAt)
 		if err != nil {
@@ -76,7 +88,8 @@ func acceptPaymentWithinTransaction(ctx context.Context, queries *generated.Quer
 	payment, err := insertOrderPayment(ctx, queries, command, order, "confirmed", acceptedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		existing, findErr := queries.GetPaymentByProviderTransaction(ctx, generated.GetPaymentByProviderTransactionParams{
-			Provider: command.Provider, ProviderTransactionID: optionalText(command.ProviderTransactionID),
+			Provider: command.Provider, PaymentEnvironment: command.Environment,
+			ProviderTransactionID: optionalText(command.ProviderTransactionID),
 		})
 		if findErr != nil {
 			return findErr
@@ -180,6 +193,7 @@ func insertOrderPayment(ctx context.Context, queries *generated.Queries, command
 		OrderID: requiredInt8(order.ID), UserID: order.UserID, Purpose: "order", Provider: command.Provider,
 		ProviderTransactionID: optionalText(command.ProviderTransactionID), PaymentReference: command.Reference,
 		AmountVnd: command.Amount.Int64(), Status: status, ConfirmedAt: confirmedAt, OccurredAt: requiredTimestamp(command.OccurredAt),
+		PaymentEnvironment: command.Environment,
 	})
 }
 
@@ -187,7 +201,7 @@ func handleExistingPayment(ctx context.Context, queries *generated.Queries, comm
 	result.PaymentID = existing.ID
 	result.OrderID = existing.OrderID.Int64
 	result.Target = existing.Purpose
-	if existing.PaymentReference != command.Reference || existing.AmountVnd != command.Amount.Int64() || existing.Currency != command.Currency {
+	if existing.PaymentReference != command.Reference || existing.AmountVnd != command.Amount.Int64() || existing.Currency != command.Currency || existing.PaymentEnvironment != command.Environment {
 		return recordPaymentReview(ctx, queries, command, &existing, existing.OrderID.Int64, "transaction_conflict", acceptedAt, result)
 	}
 	allocation, err := queries.GetPaymentAllocation(ctx, existing.ID)
@@ -212,7 +226,10 @@ func acceptWalletTopupPayment(ctx context.Context, queries *generated.Queries, c
 	result.Target = "wallet_topup"
 	result.TopupID = topup.ID
 	reason := ""
-	if topup.AmountVnd != command.Amount.Int64() {
+	if topup.PaymentEnvironment != command.Environment ||
+		(command.ProviderAccountMappingID > 0 && topup.BankAccountID != command.LocalBankAccountID) {
+		reason = "provider_destination_account_mismatch"
+	} else if topup.AmountVnd != command.Amount.Int64() {
 		reason = "amount_mismatch"
 	} else if topup.Currency != command.Currency {
 		reason = "currency_mismatch"
@@ -231,10 +248,10 @@ func acceptWalletTopupPayment(ctx context.Context, queries *generated.Queries, c
 		UserID: topup.UserID, Purpose: "wallet_topup", Provider: command.Provider,
 		ProviderTransactionID: optionalText(command.ProviderTransactionID), PaymentReference: command.Reference,
 		AmountVnd: command.Amount.Int64(), Status: status, ConfirmedAt: confirmedAt,
-		OccurredAt: requiredTimestamp(command.OccurredAt),
+		OccurredAt: requiredTimestamp(command.OccurredAt), PaymentEnvironment: command.Environment,
 	})
 	if errors.Is(err, pgx.ErrNoRows) {
-		existing, findErr := queries.GetPaymentByProviderTransaction(ctx, generated.GetPaymentByProviderTransactionParams{Provider: command.Provider, ProviderTransactionID: optionalText(command.ProviderTransactionID)})
+		existing, findErr := queries.GetPaymentByProviderTransaction(ctx, generated.GetPaymentByProviderTransactionParams{Provider: command.Provider, PaymentEnvironment: command.Environment, ProviderTransactionID: optionalText(command.ProviderTransactionID)})
 		if findErr != nil {
 			return findErr
 		}
@@ -284,6 +301,9 @@ func recordTopupReview(ctx context.Context, queries *generated.Queries, command 
 		PaymentEventID: optionalInt8(command.PaymentEventID), PaymentID: optionalInt8(paymentID), WalletTopupID: optionalInt8(topupID),
 		Provider: command.Provider, ProviderTransactionID: optionalText(command.ProviderTransactionID), PaymentReference: command.Reference,
 		AmountVnd: command.Amount.Int64(), Currency: command.Currency, OccurredAt: requiredTimestamp(command.OccurredAt), Reason: reason,
+		PaymentEnvironment: command.Environment, EventSource: command.Source,
+		ProviderAccountMappingID:   optionalInt8(command.ProviderAccountMappingID),
+		DestinationAccountIdentity: optionalText(command.DestinationAccountID),
 	})
 	if err != nil {
 		return err
@@ -307,6 +327,9 @@ func recordPaymentReview(ctx context.Context, queries *generated.Queries, comman
 		Provider: command.Provider, ProviderTransactionID: optionalText(command.ProviderTransactionID),
 		PaymentReference: command.Reference, AmountVnd: command.Amount.Int64(), Currency: command.Currency,
 		OccurredAt: requiredTimestamp(command.OccurredAt), Reason: reason,
+		PaymentEnvironment: command.Environment, EventSource: command.Source,
+		ProviderAccountMappingID:   optionalInt8(command.ProviderAccountMappingID),
+		DestinationAccountIdentity: optionalText(command.DestinationAccountID),
 	})
 	if err != nil {
 		return err

@@ -21,7 +21,7 @@ WHERE id = $1
   AND status = 'pending_payment'
   AND expires_at > $3
   AND version = $4
-RETURNING id, user_id, status, currency, subtotal_vnd, total_vnd, payment_reference, idempotency_key, expires_at, paid_at, delivery_started_at, delivered_at, cancelled_at, version, created_at, updated_at, bank_account_id, bank_bin_snapshot, bank_name_snapshot, bank_display_name_snapshot, bank_account_name_snapshot, encrypted_account_number_snapshot, account_number_nonce_snapshot, account_encryption_format_snapshot, account_key_version_snapshot, account_last4_snapshot
+RETURNING id, user_id, status, currency, subtotal_vnd, total_vnd, payment_reference, idempotency_key, expires_at, paid_at, delivery_started_at, delivered_at, cancelled_at, version, created_at, updated_at, bank_account_id, bank_bin_snapshot, bank_name_snapshot, bank_display_name_snapshot, bank_account_name_snapshot, encrypted_account_number_snapshot, account_number_nonce_snapshot, account_encryption_format_snapshot, account_key_version_snapshot, account_last4_snapshot, payment_environment
 `
 
 type CancelPendingOrderOwnedGuardedParams struct {
@@ -66,6 +66,7 @@ func (q *Queries) CancelPendingOrderOwnedGuarded(ctx context.Context, arg Cancel
 		&i.AccountEncryptionFormatSnapshot,
 		&i.AccountKeyVersionSnapshot,
 		&i.AccountLast4Snapshot,
+		&i.PaymentEnvironment,
 	)
 	return i, err
 }
@@ -87,7 +88,7 @@ FROM selected_orders
 WHERE orders.id = selected_orders.id
   AND orders.status = 'pending_payment'
   AND orders.expires_at <= $1
-RETURNING orders.id, orders.user_id, orders.status, orders.currency, orders.subtotal_vnd, orders.total_vnd, orders.payment_reference, orders.idempotency_key, orders.expires_at, orders.paid_at, orders.delivery_started_at, orders.delivered_at, orders.cancelled_at, orders.version, orders.created_at, orders.updated_at, orders.bank_account_id, orders.bank_bin_snapshot, orders.bank_name_snapshot, orders.bank_display_name_snapshot, orders.bank_account_name_snapshot, orders.encrypted_account_number_snapshot, orders.account_number_nonce_snapshot, orders.account_encryption_format_snapshot, orders.account_key_version_snapshot, orders.account_last4_snapshot
+RETURNING orders.id, orders.user_id, orders.status, orders.currency, orders.subtotal_vnd, orders.total_vnd, orders.payment_reference, orders.idempotency_key, orders.expires_at, orders.paid_at, orders.delivery_started_at, orders.delivered_at, orders.cancelled_at, orders.version, orders.created_at, orders.updated_at, orders.bank_account_id, orders.bank_bin_snapshot, orders.bank_name_snapshot, orders.bank_display_name_snapshot, orders.bank_account_name_snapshot, orders.encrypted_account_number_snapshot, orders.account_number_nonce_snapshot, orders.account_encryption_format_snapshot, orders.account_key_version_snapshot, orders.account_last4_snapshot, orders.payment_environment
 `
 
 type ClaimOverduePendingOrdersParams struct {
@@ -131,6 +132,7 @@ func (q *Queries) ClaimOverduePendingOrders(ctx context.Context, arg ClaimOverdu
 			&i.AccountEncryptionFormatSnapshot,
 			&i.AccountKeyVersionSnapshot,
 			&i.AccountLast4Snapshot,
+			&i.PaymentEnvironment,
 		); err != nil {
 			return nil, err
 		}
@@ -196,7 +198,7 @@ INSERT INTO orders (
     $5,
     $6
 )
-RETURNING id, user_id, status, currency, subtotal_vnd, total_vnd, payment_reference, idempotency_key, expires_at, paid_at, delivery_started_at, delivered_at, cancelled_at, version, created_at, updated_at, bank_account_id, bank_bin_snapshot, bank_name_snapshot, bank_display_name_snapshot, bank_account_name_snapshot, encrypted_account_number_snapshot, account_number_nonce_snapshot, account_encryption_format_snapshot, account_key_version_snapshot, account_last4_snapshot
+RETURNING id, user_id, status, currency, subtotal_vnd, total_vnd, payment_reference, idempotency_key, expires_at, paid_at, delivery_started_at, delivered_at, cancelled_at, version, created_at, updated_at, bank_account_id, bank_bin_snapshot, bank_name_snapshot, bank_display_name_snapshot, bank_account_name_snapshot, encrypted_account_number_snapshot, account_number_nonce_snapshot, account_encryption_format_snapshot, account_key_version_snapshot, account_last4_snapshot, payment_environment
 `
 
 type CreatePendingOrderParams struct {
@@ -245,6 +247,7 @@ func (q *Queries) CreatePendingOrder(ctx context.Context, arg CreatePendingOrder
 		&i.AccountEncryptionFormatSnapshot,
 		&i.AccountKeyVersionSnapshot,
 		&i.AccountLast4Snapshot,
+		&i.PaymentEnvironment,
 	)
 	return i, err
 }
@@ -257,7 +260,7 @@ INSERT INTO orders (
     bank_display_name_snapshot, bank_account_name_snapshot,
     encrypted_account_number_snapshot, account_number_nonce_snapshot,
     account_encryption_format_snapshot, account_key_version_snapshot,
-    account_last4_snapshot
+    account_last4_snapshot, payment_environment
 ) VALUES (
     $1, 'pending_payment', 'VND',
     $2, $3,
@@ -267,10 +270,11 @@ INSERT INTO orders (
     $10, $11,
     $12,
     $13, 'aes-256-gcm-v1',
-    $14, $15
+    $14, $15,
+    $16
 )
 ON CONFLICT DO NOTHING
-RETURNING id, user_id, status, currency, subtotal_vnd, total_vnd, payment_reference, idempotency_key, expires_at, paid_at, delivery_started_at, delivered_at, cancelled_at, version, created_at, updated_at, bank_account_id, bank_bin_snapshot, bank_name_snapshot, bank_display_name_snapshot, bank_account_name_snapshot, encrypted_account_number_snapshot, account_number_nonce_snapshot, account_encryption_format_snapshot, account_key_version_snapshot, account_last4_snapshot
+RETURNING id, user_id, status, currency, subtotal_vnd, total_vnd, payment_reference, idempotency_key, expires_at, paid_at, delivery_started_at, delivered_at, cancelled_at, version, created_at, updated_at, bank_account_id, bank_bin_snapshot, bank_name_snapshot, bank_display_name_snapshot, bank_account_name_snapshot, encrypted_account_number_snapshot, account_number_nonce_snapshot, account_encryption_format_snapshot, account_key_version_snapshot, account_last4_snapshot, payment_environment
 `
 
 type CreatePendingOrderWithBankParams struct {
@@ -289,6 +293,7 @@ type CreatePendingOrderWithBankParams struct {
 	AccountNumberNonceSnapshot     []byte             `db:"account_number_nonce_snapshot" json:"account_number_nonce_snapshot"`
 	AccountKeyVersionSnapshot      pgtype.Int4        `db:"account_key_version_snapshot" json:"account_key_version_snapshot"`
 	AccountLast4Snapshot           pgtype.Text        `db:"account_last4_snapshot" json:"account_last4_snapshot"`
+	PaymentEnvironment             string             `db:"payment_environment" json:"payment_environment"`
 }
 
 func (q *Queries) CreatePendingOrderWithBank(ctx context.Context, arg CreatePendingOrderWithBankParams) (Order, error) {
@@ -308,6 +313,7 @@ func (q *Queries) CreatePendingOrderWithBank(ctx context.Context, arg CreatePend
 		arg.AccountNumberNonceSnapshot,
 		arg.AccountKeyVersionSnapshot,
 		arg.AccountLast4Snapshot,
+		arg.PaymentEnvironment,
 	)
 	var i Order
 	err := row.Scan(
@@ -337,12 +343,13 @@ func (q *Queries) CreatePendingOrderWithBank(ctx context.Context, arg CreatePend
 		&i.AccountEncryptionFormatSnapshot,
 		&i.AccountKeyVersionSnapshot,
 		&i.AccountLast4Snapshot,
+		&i.PaymentEnvironment,
 	)
 	return i, err
 }
 
 const findOrderByPaymentReference = `-- name: FindOrderByPaymentReference :one
-SELECT id, user_id, status, currency, subtotal_vnd, total_vnd, payment_reference, idempotency_key, expires_at, paid_at, delivery_started_at, delivered_at, cancelled_at, version, created_at, updated_at, bank_account_id, bank_bin_snapshot, bank_name_snapshot, bank_display_name_snapshot, bank_account_name_snapshot, encrypted_account_number_snapshot, account_number_nonce_snapshot, account_encryption_format_snapshot, account_key_version_snapshot, account_last4_snapshot FROM orders
+SELECT id, user_id, status, currency, subtotal_vnd, total_vnd, payment_reference, idempotency_key, expires_at, paid_at, delivery_started_at, delivered_at, cancelled_at, version, created_at, updated_at, bank_account_id, bank_bin_snapshot, bank_name_snapshot, bank_display_name_snapshot, bank_account_name_snapshot, encrypted_account_number_snapshot, account_number_nonce_snapshot, account_encryption_format_snapshot, account_key_version_snapshot, account_last4_snapshot, payment_environment FROM orders
 WHERE payment_reference = $1
 `
 
@@ -376,12 +383,13 @@ func (q *Queries) FindOrderByPaymentReference(ctx context.Context, paymentRefere
 		&i.AccountEncryptionFormatSnapshot,
 		&i.AccountKeyVersionSnapshot,
 		&i.AccountLast4Snapshot,
+		&i.PaymentEnvironment,
 	)
 	return i, err
 }
 
 const findOrderByUserIdempotency = `-- name: FindOrderByUserIdempotency :one
-SELECT id, user_id, status, currency, subtotal_vnd, total_vnd, payment_reference, idempotency_key, expires_at, paid_at, delivery_started_at, delivered_at, cancelled_at, version, created_at, updated_at, bank_account_id, bank_bin_snapshot, bank_name_snapshot, bank_display_name_snapshot, bank_account_name_snapshot, encrypted_account_number_snapshot, account_number_nonce_snapshot, account_encryption_format_snapshot, account_key_version_snapshot, account_last4_snapshot FROM orders
+SELECT id, user_id, status, currency, subtotal_vnd, total_vnd, payment_reference, idempotency_key, expires_at, paid_at, delivery_started_at, delivered_at, cancelled_at, version, created_at, updated_at, bank_account_id, bank_bin_snapshot, bank_name_snapshot, bank_display_name_snapshot, bank_account_name_snapshot, encrypted_account_number_snapshot, account_number_nonce_snapshot, account_encryption_format_snapshot, account_key_version_snapshot, account_last4_snapshot, payment_environment FROM orders
 WHERE user_id = $1
   AND idempotency_key = $2
 `
@@ -421,12 +429,13 @@ func (q *Queries) FindOrderByUserIdempotency(ctx context.Context, arg FindOrderB
 		&i.AccountEncryptionFormatSnapshot,
 		&i.AccountKeyVersionSnapshot,
 		&i.AccountLast4Snapshot,
+		&i.PaymentEnvironment,
 	)
 	return i, err
 }
 
 const getOrderByID = `-- name: GetOrderByID :one
-SELECT id, user_id, status, currency, subtotal_vnd, total_vnd, payment_reference, idempotency_key, expires_at, paid_at, delivery_started_at, delivered_at, cancelled_at, version, created_at, updated_at, bank_account_id, bank_bin_snapshot, bank_name_snapshot, bank_display_name_snapshot, bank_account_name_snapshot, encrypted_account_number_snapshot, account_number_nonce_snapshot, account_encryption_format_snapshot, account_key_version_snapshot, account_last4_snapshot
+SELECT id, user_id, status, currency, subtotal_vnd, total_vnd, payment_reference, idempotency_key, expires_at, paid_at, delivery_started_at, delivered_at, cancelled_at, version, created_at, updated_at, bank_account_id, bank_bin_snapshot, bank_name_snapshot, bank_display_name_snapshot, bank_account_name_snapshot, encrypted_account_number_snapshot, account_number_nonce_snapshot, account_encryption_format_snapshot, account_key_version_snapshot, account_last4_snapshot, payment_environment
 FROM orders
 WHERE id = $1
 `
@@ -461,12 +470,13 @@ func (q *Queries) GetOrderByID(ctx context.Context, id int64) (Order, error) {
 		&i.AccountEncryptionFormatSnapshot,
 		&i.AccountKeyVersionSnapshot,
 		&i.AccountLast4Snapshot,
+		&i.PaymentEnvironment,
 	)
 	return i, err
 }
 
 const getOrderDetailOwnedByTelegramUser = `-- name: GetOrderDetailOwnedByTelegramUser :one
-SELECT orders.id, orders.user_id, orders.status, orders.currency, orders.subtotal_vnd, orders.total_vnd, orders.payment_reference, orders.idempotency_key, orders.expires_at, orders.paid_at, orders.delivery_started_at, orders.delivered_at, orders.cancelled_at, orders.version, orders.created_at, orders.updated_at, orders.bank_account_id, orders.bank_bin_snapshot, orders.bank_name_snapshot, orders.bank_display_name_snapshot, orders.bank_account_name_snapshot, orders.encrypted_account_number_snapshot, orders.account_number_nonce_snapshot, orders.account_encryption_format_snapshot, orders.account_key_version_snapshot, orders.account_last4_snapshot, item.id AS order_item_id, item.product_id,
+SELECT orders.id, orders.user_id, orders.status, orders.currency, orders.subtotal_vnd, orders.total_vnd, orders.payment_reference, orders.idempotency_key, orders.expires_at, orders.paid_at, orders.delivery_started_at, orders.delivered_at, orders.cancelled_at, orders.version, orders.created_at, orders.updated_at, orders.bank_account_id, orders.bank_bin_snapshot, orders.bank_name_snapshot, orders.bank_display_name_snapshot, orders.bank_account_name_snapshot, orders.encrypted_account_number_snapshot, orders.account_number_nonce_snapshot, orders.account_encryption_format_snapshot, orders.account_key_version_snapshot, orders.account_last4_snapshot, orders.payment_environment, item.id AS order_item_id, item.product_id,
        item.product_name, item.unit_price_vnd, item.quantity,
        item.line_total_vnd, delivery.status AS delivery_status
 FROM orders
@@ -516,6 +526,7 @@ type GetOrderDetailOwnedByTelegramUserRow struct {
 	AccountEncryptionFormatSnapshot pgtype.Text        `db:"account_encryption_format_snapshot" json:"account_encryption_format_snapshot"`
 	AccountKeyVersionSnapshot       pgtype.Int4        `db:"account_key_version_snapshot" json:"account_key_version_snapshot"`
 	AccountLast4Snapshot            pgtype.Text        `db:"account_last4_snapshot" json:"account_last4_snapshot"`
+	PaymentEnvironment              string             `db:"payment_environment" json:"payment_environment"`
 	OrderItemID                     int64              `db:"order_item_id" json:"order_item_id"`
 	ProductID                       int64              `db:"product_id" json:"product_id"`
 	ProductName                     string             `db:"product_name" json:"product_name"`
@@ -555,6 +566,7 @@ func (q *Queries) GetOrderDetailOwnedByTelegramUser(ctx context.Context, arg Get
 		&i.AccountEncryptionFormatSnapshot,
 		&i.AccountKeyVersionSnapshot,
 		&i.AccountLast4Snapshot,
+		&i.PaymentEnvironment,
 		&i.OrderItemID,
 		&i.ProductID,
 		&i.ProductName,
@@ -567,7 +579,7 @@ func (q *Queries) GetOrderDetailOwnedByTelegramUser(ctx context.Context, arg Get
 }
 
 const getOrderOwnedByUser = `-- name: GetOrderOwnedByUser :one
-SELECT id, user_id, status, currency, subtotal_vnd, total_vnd, payment_reference, idempotency_key, expires_at, paid_at, delivery_started_at, delivered_at, cancelled_at, version, created_at, updated_at, bank_account_id, bank_bin_snapshot, bank_name_snapshot, bank_display_name_snapshot, bank_account_name_snapshot, encrypted_account_number_snapshot, account_number_nonce_snapshot, account_encryption_format_snapshot, account_key_version_snapshot, account_last4_snapshot
+SELECT id, user_id, status, currency, subtotal_vnd, total_vnd, payment_reference, idempotency_key, expires_at, paid_at, delivery_started_at, delivered_at, cancelled_at, version, created_at, updated_at, bank_account_id, bank_bin_snapshot, bank_name_snapshot, bank_display_name_snapshot, bank_account_name_snapshot, encrypted_account_number_snapshot, account_number_nonce_snapshot, account_encryption_format_snapshot, account_key_version_snapshot, account_last4_snapshot, payment_environment
 FROM orders
 WHERE id = $1
   AND user_id = $2
@@ -608,6 +620,7 @@ func (q *Queries) GetOrderOwnedByUser(ctx context.Context, arg GetOrderOwnedByUs
 		&i.AccountEncryptionFormatSnapshot,
 		&i.AccountKeyVersionSnapshot,
 		&i.AccountLast4Snapshot,
+		&i.PaymentEnvironment,
 	)
 	return i, err
 }
@@ -825,7 +838,7 @@ func (q *Queries) ListOrdersOwnedByTelegramUser(ctx context.Context, arg ListOrd
 }
 
 const lockOrderByPaymentReference = `-- name: LockOrderByPaymentReference :one
-SELECT orders.id, orders.user_id, orders.status, orders.currency, orders.subtotal_vnd, orders.total_vnd, orders.payment_reference, orders.idempotency_key, orders.expires_at, orders.paid_at, orders.delivery_started_at, orders.delivered_at, orders.cancelled_at, orders.version, orders.created_at, orders.updated_at, orders.bank_account_id, orders.bank_bin_snapshot, orders.bank_name_snapshot, orders.bank_display_name_snapshot, orders.bank_account_name_snapshot, orders.encrypted_account_number_snapshot, orders.account_number_nonce_snapshot, orders.account_encryption_format_snapshot, orders.account_key_version_snapshot, orders.account_last4_snapshot, item.id AS order_item_id, item.product_id,
+SELECT orders.id, orders.user_id, orders.status, orders.currency, orders.subtotal_vnd, orders.total_vnd, orders.payment_reference, orders.idempotency_key, orders.expires_at, orders.paid_at, orders.delivery_started_at, orders.delivered_at, orders.cancelled_at, orders.version, orders.created_at, orders.updated_at, orders.bank_account_id, orders.bank_bin_snapshot, orders.bank_name_snapshot, orders.bank_display_name_snapshot, orders.bank_account_name_snapshot, orders.encrypted_account_number_snapshot, orders.account_number_nonce_snapshot, orders.account_encryption_format_snapshot, orders.account_key_version_snapshot, orders.account_last4_snapshot, orders.payment_environment, item.id AS order_item_id, item.product_id,
        item.product_name, item.unit_price_vnd, item.quantity,
        item.line_total_vnd
 FROM orders
@@ -863,6 +876,7 @@ type LockOrderByPaymentReferenceRow struct {
 	AccountEncryptionFormatSnapshot pgtype.Text        `db:"account_encryption_format_snapshot" json:"account_encryption_format_snapshot"`
 	AccountKeyVersionSnapshot       pgtype.Int4        `db:"account_key_version_snapshot" json:"account_key_version_snapshot"`
 	AccountLast4Snapshot            pgtype.Text        `db:"account_last4_snapshot" json:"account_last4_snapshot"`
+	PaymentEnvironment              string             `db:"payment_environment" json:"payment_environment"`
 	OrderItemID                     int64              `db:"order_item_id" json:"order_item_id"`
 	ProductID                       int64              `db:"product_id" json:"product_id"`
 	ProductName                     string             `db:"product_name" json:"product_name"`
@@ -901,6 +915,7 @@ func (q *Queries) LockOrderByPaymentReference(ctx context.Context, paymentRefere
 		&i.AccountEncryptionFormatSnapshot,
 		&i.AccountKeyVersionSnapshot,
 		&i.AccountLast4Snapshot,
+		&i.PaymentEnvironment,
 		&i.OrderItemID,
 		&i.ProductID,
 		&i.ProductName,
@@ -912,7 +927,7 @@ func (q *Queries) LockOrderByPaymentReference(ctx context.Context, paymentRefere
 }
 
 const lockOrderDetailOwnedByTelegramUser = `-- name: LockOrderDetailOwnedByTelegramUser :one
-SELECT orders.id, orders.user_id, orders.status, orders.currency, orders.subtotal_vnd, orders.total_vnd, orders.payment_reference, orders.idempotency_key, orders.expires_at, orders.paid_at, orders.delivery_started_at, orders.delivered_at, orders.cancelled_at, orders.version, orders.created_at, orders.updated_at, orders.bank_account_id, orders.bank_bin_snapshot, orders.bank_name_snapshot, orders.bank_display_name_snapshot, orders.bank_account_name_snapshot, orders.encrypted_account_number_snapshot, orders.account_number_nonce_snapshot, orders.account_encryption_format_snapshot, orders.account_key_version_snapshot, orders.account_last4_snapshot, item.id AS order_item_id, item.product_id,
+SELECT orders.id, orders.user_id, orders.status, orders.currency, orders.subtotal_vnd, orders.total_vnd, orders.payment_reference, orders.idempotency_key, orders.expires_at, orders.paid_at, orders.delivery_started_at, orders.delivered_at, orders.cancelled_at, orders.version, orders.created_at, orders.updated_at, orders.bank_account_id, orders.bank_bin_snapshot, orders.bank_name_snapshot, orders.bank_display_name_snapshot, orders.bank_account_name_snapshot, orders.encrypted_account_number_snapshot, orders.account_number_nonce_snapshot, orders.account_encryption_format_snapshot, orders.account_key_version_snapshot, orders.account_last4_snapshot, orders.payment_environment, item.id AS order_item_id, item.product_id,
        item.product_name, item.unit_price_vnd, item.quantity,
        item.line_total_vnd
 FROM orders
@@ -960,6 +975,7 @@ type LockOrderDetailOwnedByTelegramUserRow struct {
 	AccountEncryptionFormatSnapshot pgtype.Text        `db:"account_encryption_format_snapshot" json:"account_encryption_format_snapshot"`
 	AccountKeyVersionSnapshot       pgtype.Int4        `db:"account_key_version_snapshot" json:"account_key_version_snapshot"`
 	AccountLast4Snapshot            pgtype.Text        `db:"account_last4_snapshot" json:"account_last4_snapshot"`
+	PaymentEnvironment              string             `db:"payment_environment" json:"payment_environment"`
 	OrderItemID                     int64              `db:"order_item_id" json:"order_item_id"`
 	ProductID                       int64              `db:"product_id" json:"product_id"`
 	ProductName                     string             `db:"product_name" json:"product_name"`
@@ -998,6 +1014,7 @@ func (q *Queries) LockOrderDetailOwnedByTelegramUser(ctx context.Context, arg Lo
 		&i.AccountEncryptionFormatSnapshot,
 		&i.AccountKeyVersionSnapshot,
 		&i.AccountLast4Snapshot,
+		&i.PaymentEnvironment,
 		&i.OrderItemID,
 		&i.ProductID,
 		&i.ProductName,
@@ -1009,7 +1026,7 @@ func (q *Queries) LockOrderDetailOwnedByTelegramUser(ctx context.Context, arg Lo
 }
 
 const lockOrderForUpdate = `-- name: LockOrderForUpdate :one
-SELECT id, user_id, status, currency, subtotal_vnd, total_vnd, payment_reference, idempotency_key, expires_at, paid_at, delivery_started_at, delivered_at, cancelled_at, version, created_at, updated_at, bank_account_id, bank_bin_snapshot, bank_name_snapshot, bank_display_name_snapshot, bank_account_name_snapshot, encrypted_account_number_snapshot, account_number_nonce_snapshot, account_encryption_format_snapshot, account_key_version_snapshot, account_last4_snapshot
+SELECT id, user_id, status, currency, subtotal_vnd, total_vnd, payment_reference, idempotency_key, expires_at, paid_at, delivery_started_at, delivered_at, cancelled_at, version, created_at, updated_at, bank_account_id, bank_bin_snapshot, bank_name_snapshot, bank_display_name_snapshot, bank_account_name_snapshot, encrypted_account_number_snapshot, account_number_nonce_snapshot, account_encryption_format_snapshot, account_key_version_snapshot, account_last4_snapshot, payment_environment
 FROM orders
 WHERE id = $1
 FOR UPDATE
@@ -1045,6 +1062,7 @@ func (q *Queries) LockOrderForUpdate(ctx context.Context, id int64) (Order, erro
 		&i.AccountEncryptionFormatSnapshot,
 		&i.AccountKeyVersionSnapshot,
 		&i.AccountLast4Snapshot,
+		&i.PaymentEnvironment,
 	)
 	return i, err
 }
@@ -1076,7 +1094,7 @@ const markOrderPaidGuarded = `-- name: MarkOrderPaidGuarded :one
 UPDATE orders
 SET status = 'paid', paid_at = $1, version = version + 1
 WHERE id = $2 AND status = 'pending_payment' AND version = $3
-RETURNING id, user_id, status, currency, subtotal_vnd, total_vnd, payment_reference, idempotency_key, expires_at, paid_at, delivery_started_at, delivered_at, cancelled_at, version, created_at, updated_at, bank_account_id, bank_bin_snapshot, bank_name_snapshot, bank_display_name_snapshot, bank_account_name_snapshot, encrypted_account_number_snapshot, account_number_nonce_snapshot, account_encryption_format_snapshot, account_key_version_snapshot, account_last4_snapshot
+RETURNING id, user_id, status, currency, subtotal_vnd, total_vnd, payment_reference, idempotency_key, expires_at, paid_at, delivery_started_at, delivered_at, cancelled_at, version, created_at, updated_at, bank_account_id, bank_bin_snapshot, bank_name_snapshot, bank_display_name_snapshot, bank_account_name_snapshot, encrypted_account_number_snapshot, account_number_nonce_snapshot, account_encryption_format_snapshot, account_key_version_snapshot, account_last4_snapshot, payment_environment
 `
 
 type MarkOrderPaidGuardedParams struct {
@@ -1115,6 +1133,7 @@ func (q *Queries) MarkOrderPaidGuarded(ctx context.Context, arg MarkOrderPaidGua
 		&i.AccountEncryptionFormatSnapshot,
 		&i.AccountKeyVersionSnapshot,
 		&i.AccountLast4Snapshot,
+		&i.PaymentEnvironment,
 	)
 	return i, err
 }
@@ -1126,7 +1145,7 @@ SET status = $1,
 WHERE id = $2
   AND status = $3
   AND version = $4
-RETURNING id, user_id, status, currency, subtotal_vnd, total_vnd, payment_reference, idempotency_key, expires_at, paid_at, delivery_started_at, delivered_at, cancelled_at, version, created_at, updated_at, bank_account_id, bank_bin_snapshot, bank_name_snapshot, bank_display_name_snapshot, bank_account_name_snapshot, encrypted_account_number_snapshot, account_number_nonce_snapshot, account_encryption_format_snapshot, account_key_version_snapshot, account_last4_snapshot
+RETURNING id, user_id, status, currency, subtotal_vnd, total_vnd, payment_reference, idempotency_key, expires_at, paid_at, delivery_started_at, delivered_at, cancelled_at, version, created_at, updated_at, bank_account_id, bank_bin_snapshot, bank_name_snapshot, bank_display_name_snapshot, bank_account_name_snapshot, encrypted_account_number_snapshot, account_number_nonce_snapshot, account_encryption_format_snapshot, account_key_version_snapshot, account_last4_snapshot, payment_environment
 `
 
 type UpdateOrderStatusGuardedParams struct {
@@ -1171,6 +1190,7 @@ func (q *Queries) UpdateOrderStatusGuarded(ctx context.Context, arg UpdateOrderS
 		&i.AccountEncryptionFormatSnapshot,
 		&i.AccountKeyVersionSnapshot,
 		&i.AccountLast4Snapshot,
+		&i.PaymentEnvironment,
 	)
 	return i, err
 }

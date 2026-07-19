@@ -26,29 +26,62 @@ const (
 var referencePattern = regexp.MustCompile(`^[A-Z0-9][A-Z0-9-]{2,127}$`)
 
 type SignedJSON struct {
-	secret    []byte
-	tolerance time.Duration
-	clock     func() time.Time
+	secret      []byte
+	tolerance   time.Duration
+	environment ProviderEnvironment
+	enabled     bool
+	clock       func() time.Time
 }
 
 type signedJSONPayload struct {
-	EventID         string         `json:"event_id"`
-	TransactionID   string         `json:"transaction_id"`
-	EventType       string         `json:"event_type"`
-	Reference       string         `json:"reference"`
-	AmountVND       int64          `json:"amount_vnd"`
-	Currency        string         `json:"currency"`
-	Timestamp       int64          `json:"timestamp"`
-	OccurredAt      time.Time      `json:"occurred_at"`
-	ReceivedAccount string         `json:"received_account,omitempty"`
-	Metadata        map[string]any `json:"metadata,omitempty"`
+	EventID              string         `json:"event_id"`
+	TransactionID        string         `json:"transaction_id"`
+	EventType            string         `json:"event_type"`
+	Reference            string         `json:"reference,omitempty"`
+	Direction            string         `json:"direction"`
+	TransferContent      string         `json:"transfer_content"`
+	DestinationAccountID string         `json:"destination_account_identity"`
+	ProviderAccountID    string         `json:"provider_account_identity,omitempty"`
+	AmountVND            int64          `json:"amount_vnd"`
+	Currency             string         `json:"currency"`
+	Timestamp            int64          `json:"timestamp"`
+	OccurredAt           time.Time      `json:"occurred_at"`
+	ReceivedAccount      string         `json:"received_account,omitempty"`
+	Metadata             map[string]any `json:"metadata,omitempty"`
 }
 
 func NewSignedJSON(secret string, tolerance time.Duration) (*SignedJSON, error) {
 	if strings.TrimSpace(secret) == "" || tolerance <= 0 {
 		return nil, app.ErrInvalidInput
 	}
-	return &SignedJSON{secret: []byte(secret), tolerance: tolerance, clock: time.Now}, nil
+	return &SignedJSON{secret: []byte(secret), tolerance: tolerance, environment: EnvironmentDevelopment, enabled: true, clock: time.Now}, nil
+}
+
+func NewSignedJSONForEnvironment(secret string, tolerance time.Duration, environment ProviderEnvironment, enabled bool) (*SignedJSON, error) {
+	if environment == EnvironmentProduction || !validEnvironment(environment) {
+		return nil, app.ErrInvalidInput
+	}
+	provider, err := NewSignedJSON(secret, tolerance)
+	if err != nil {
+		return nil, err
+	}
+	provider.environment = environment
+	provider.enabled = enabled
+	return provider, nil
+}
+
+func (*SignedJSON) Name() ProviderName                 { return ProviderName(SignedJSONProvider) }
+func (s *SignedJSON) Enabled() bool                    { return s.enabled }
+func (s *SignedJSON) Environment() ProviderEnvironment { return s.environment }
+func (*SignedJSON) Capabilities() ProviderCapabilities {
+	return ProviderCapabilities{SupportsWebhook: true, SupportsTestMode: true}
+}
+
+func (s *SignedJSON) VerifyAndNormalizeWebhook(ctx context.Context, request WebhookRequest) (app.NormalizedPaymentEvent, WebhookAcknowledgement, error) {
+	event, err := s.VerifyAndNormalize(ctx, request.Headers, request.RawBody)
+	ack := JSONAcknowledgement(http.StatusAccepted, []byte(`{"status":"accepted","duplicate":false}`))
+	ack.DuplicateBody = []byte(`{"status":"accepted","duplicate":true}`)
+	return event, ack, err
 }
 
 func (s *SignedJSON) VerifyAndNormalize(_ context.Context, headers http.Header, body []byte) (app.NormalizedPaymentEvent, error) {
@@ -80,6 +113,7 @@ func (s *SignedJSON) VerifyAndNormalize(_ context.Context, headers http.Header, 
 	sanitized, err := json.Marshal(map[string]any{
 		"reference": payload.Reference, "amount_vnd": payload.AmountVND,
 		"currency": payload.Currency, "occurred_at": payload.OccurredAt,
+		"direction": payload.Direction, "source": "webhook",
 		"metadata": payload.Metadata,
 	})
 	if err != nil {
@@ -87,8 +121,11 @@ func (s *SignedJSON) VerifyAndNormalize(_ context.Context, headers http.Header, 
 	}
 	hash := sha256.Sum256(body)
 	return app.NormalizedPaymentEvent{
-		Provider: SignedJSONProvider, ExternalEventID: payload.EventID,
+		Provider: SignedJSONProvider, Environment: string(s.environment), ExternalEventID: payload.EventID,
 		ProviderTransactionID: payload.TransactionID, Reference: payload.Reference,
+		Direction: payload.Direction, TransferContent: payload.TransferContent,
+		DestinationAccountID: payload.DestinationAccountID, ProviderAccountID: payload.ProviderAccountID,
+		Source: "webhook",
 		Amount: domain.Money(payload.AmountVND), Currency: payload.Currency,
 		OccurredAt: payload.OccurredAt, ReceivedAccount: maskAccount(payload.ReceivedAccount),
 		EventType: payload.EventType, PayloadHash: hash[:], SanitizedMetadata: sanitized,
@@ -98,7 +135,10 @@ func (s *SignedJSON) VerifyAndNormalize(_ context.Context, headers http.Header, 
 func validPayload(payload signedJSONPayload) bool {
 	return strings.TrimSpace(payload.EventID) == payload.EventID && payload.EventID != "" && len(payload.EventID) <= 128 &&
 		strings.TrimSpace(payload.TransactionID) == payload.TransactionID && payload.TransactionID != "" && len(payload.TransactionID) <= 128 &&
-		payload.EventType == "payment.received" && referencePattern.MatchString(payload.Reference) &&
+		payload.EventType == "payment.received" && (payload.Reference == "" || referencePattern.MatchString(payload.Reference)) &&
+		(payload.Direction == "inbound" || payload.Direction == "outbound") &&
+		strings.TrimSpace(payload.TransferContent) == payload.TransferContent && payload.TransferContent != "" && len(payload.TransferContent) <= 2048 &&
+		strings.TrimSpace(payload.DestinationAccountID) == payload.DestinationAccountID && payload.DestinationAccountID != "" && len(payload.DestinationAccountID) <= 256 &&
 		payload.AmountVND > 0 && payload.Currency == "VND" && !payload.OccurredAt.IsZero()
 }
 

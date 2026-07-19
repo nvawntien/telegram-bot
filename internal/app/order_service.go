@@ -25,14 +25,15 @@ type OrderProductRecord struct {
 }
 
 type PendingOrderInsert struct {
-	UserID           int64
-	Product          OrderProductRecord
-	Quantity         int32
-	LineTotal        domain.Money
-	PaymentReference string
-	IdempotencyKey   string
-	ExpiresAt        time.Time
-	Bank             BankAccountRecord
+	UserID             int64
+	Product            OrderProductRecord
+	Quantity           int32
+	LineTotal          domain.Money
+	PaymentReference   string
+	IdempotencyKey     string
+	ExpiresAt          time.Time
+	Bank               BankAccountRecord
+	PaymentEnvironment string
 }
 
 type OrderTransaction interface {
@@ -56,14 +57,15 @@ type OrderRepository interface {
 }
 
 type OrderService struct {
-	repository   OrderRepository
-	cipher       BankAccountCipher
-	instructions PaymentInstructionGenerator
-	references   PaymentReferenceGenerator
-	expiry       time.Duration
-	maxQuantity  int32
-	pageSize     int
-	clock        func() time.Time
+	repository         OrderRepository
+	cipher             BankAccountCipher
+	instructions       PaymentInstructionGenerator
+	references         PaymentReferenceGenerator
+	expiry             time.Duration
+	maxQuantity        int32
+	pageSize           int
+	clock              func() time.Time
+	paymentEnvironment string
 }
 
 func NewOrderService(
@@ -81,7 +83,15 @@ func NewOrderService(
 	return &OrderService{
 		repository: repository, cipher: cipher, instructions: instructions, references: references,
 		expiry: expiry, maxQuantity: maxQuantity, pageSize: pageSize, clock: time.Now,
+		paymentEnvironment: "production",
 	}
+}
+
+func (s *OrderService) WithPaymentEnvironment(environment string) *OrderService {
+	if validPaymentEnvironment(environment) {
+		s.paymentEnvironment = environment
+	}
+	return s
 }
 
 func (s *OrderService) Create(ctx context.Context, command CreateOrderCommand) (CreateOrderResult, error) {
@@ -169,6 +179,7 @@ func (s *OrderService) Create(ctx context.Context, command CreateOrderCommand) (
 				UserID: user.ID, Product: product, Quantity: command.Quantity,
 				LineTotal: lineTotal, PaymentReference: reference,
 				IdempotencyKey: command.IdempotencyKey, ExpiresAt: expiresAt, Bank: bank,
+				PaymentEnvironment: s.paymentEnvironment,
 			})
 			if err != nil {
 				return err

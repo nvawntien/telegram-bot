@@ -17,16 +17,21 @@ type PaymentActor struct {
 }
 
 type AcceptPaymentCommand struct {
-	PaymentEventID        int64
-	Provider              string
-	ExternalEventID       string
-	ProviderTransactionID string
-	Reference             string
-	Amount                domain.Money
-	Currency              string
-	OccurredAt            time.Time
-	Actor                 PaymentActor
-	RequestID             string
+	PaymentEventID           int64
+	Provider                 string
+	ExternalEventID          string
+	ProviderTransactionID    string
+	Reference                string
+	Amount                   domain.Money
+	Currency                 string
+	OccurredAt               time.Time
+	Actor                    PaymentActor
+	RequestID                string
+	Environment              string
+	Source                   string
+	ProviderAccountMappingID int64
+	LocalBankAccountID       int64
+	DestinationAccountID     string
 }
 
 type PaymentAcceptanceResult struct {
@@ -73,9 +78,25 @@ func (s *PaymentAcceptanceService) Accept(ctx context.Context, command AcceptPay
 	command.ProviderTransactionID = strings.TrimSpace(command.ProviderTransactionID)
 	command.Reference = strings.TrimSpace(command.Reference)
 	command.Currency = strings.TrimSpace(command.Currency)
+	command.Environment = strings.TrimSpace(strings.ToLower(command.Environment))
+	if command.Environment == "" {
+		command.Environment = "production"
+	}
+	command.Source = strings.TrimSpace(strings.ToLower(command.Source))
+	command.DestinationAccountID = strings.TrimSpace(command.DestinationAccountID)
+	if command.Source == "" {
+		if command.Actor.Type == "provider" {
+			command.Source = "webhook"
+		} else {
+			command.Source = "manual"
+		}
+	}
 	if command.Provider == "" || command.ProviderTransactionID == "" || command.Reference == "" ||
 		command.Amount <= 0 || command.Currency == "" || command.OccurredAt.IsZero() ||
-		(command.Actor.Type != "provider" && command.Actor.Type != "admin") || s.reservationTTL <= 0 {
+		(command.Actor.Type != "provider" && command.Actor.Type != "admin" && command.Actor.Type != "user") ||
+		!validPaymentEnvironment(command.Environment) ||
+		(command.Source != "webhook" && command.Source != "reconciliation" && command.Source != "manual" && command.Source != "legacy") ||
+		s.reservationTTL <= 0 {
 		return PaymentAcceptanceResult{}, ErrInvalidInput
 	}
 	result, err := s.repository.AcceptPayment(ctx, command, s.clock(), s.reservationTTL, s.deliveryMaxAttempts)

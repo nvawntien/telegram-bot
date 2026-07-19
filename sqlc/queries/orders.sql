@@ -54,7 +54,7 @@ INSERT INTO orders (
     bank_display_name_snapshot, bank_account_name_snapshot,
     encrypted_account_number_snapshot, account_number_nonce_snapshot,
     account_encryption_format_snapshot, account_key_version_snapshot,
-    account_last4_snapshot
+    account_last4_snapshot, payment_environment
 ) VALUES (
     sqlc.arg(user_id), 'pending_payment', 'VND',
     sqlc.arg(subtotal_vnd), sqlc.arg(total_vnd),
@@ -64,7 +64,8 @@ INSERT INTO orders (
     sqlc.arg(bank_display_name_snapshot), sqlc.arg(bank_account_name_snapshot),
     sqlc.arg(encrypted_account_number_snapshot),
     sqlc.arg(account_number_nonce_snapshot), 'aes-256-gcm-v1',
-    sqlc.arg(account_key_version_snapshot), sqlc.arg(account_last4_snapshot)
+    sqlc.arg(account_key_version_snapshot), sqlc.arg(account_last4_snapshot),
+    sqlc.arg(payment_environment)
 )
 ON CONFLICT DO NOTHING
 RETURNING *;

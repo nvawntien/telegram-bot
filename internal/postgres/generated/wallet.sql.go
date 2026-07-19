@@ -17,17 +17,19 @@ INSERT INTO wallet_topup_intents (
     idempotency_key, expires_at, bank_account_id, bank_bin_snapshot,
     bank_name_snapshot, bank_display_name_snapshot, bank_account_name_snapshot,
     encrypted_account_number_snapshot, account_number_nonce_snapshot,
-    account_encryption_format_snapshot, account_key_version_snapshot, account_last4_snapshot
+    account_encryption_format_snapshot, account_key_version_snapshot, account_last4_snapshot,
+    payment_environment
 ) VALUES (
     $1, $2, $3,
     $4, $5, $6,
     $7, $8, $9,
     $10, $11,
     $12, $13,
-    'aes-256-gcm-v1', $14, $15
+    'aes-256-gcm-v1', $14, $15,
+    COALESCE(NULLIF($16, ''), 'production')
 )
 ON CONFLICT DO NOTHING
-RETURNING id, user_id, wallet_account_id, amount_vnd, currency, payment_reference, idempotency_key, status, expires_at, credited_at, bank_account_id, bank_bin_snapshot, bank_name_snapshot, bank_display_name_snapshot, bank_account_name_snapshot, encrypted_account_number_snapshot, account_number_nonce_snapshot, account_encryption_format_snapshot, account_key_version_snapshot, account_last4_snapshot, version, created_at, updated_at
+RETURNING id, user_id, wallet_account_id, amount_vnd, currency, payment_reference, idempotency_key, status, expires_at, credited_at, bank_account_id, bank_bin_snapshot, bank_name_snapshot, bank_display_name_snapshot, bank_account_name_snapshot, encrypted_account_number_snapshot, account_number_nonce_snapshot, account_encryption_format_snapshot, account_key_version_snapshot, account_last4_snapshot, version, created_at, updated_at, payment_environment
 `
 
 type CreateWalletTopupParams struct {
@@ -46,6 +48,7 @@ type CreateWalletTopupParams struct {
 	AccountNumberNonceSnapshot     []byte             `db:"account_number_nonce_snapshot" json:"account_number_nonce_snapshot"`
 	AccountKeyVersionSnapshot      int32              `db:"account_key_version_snapshot" json:"account_key_version_snapshot"`
 	AccountLast4Snapshot           string             `db:"account_last4_snapshot" json:"account_last4_snapshot"`
+	PaymentEnvironment             interface{}        `db:"payment_environment" json:"payment_environment"`
 }
 
 func (q *Queries) CreateWalletTopup(ctx context.Context, arg CreateWalletTopupParams) (WalletTopupIntent, error) {
@@ -65,6 +68,7 @@ func (q *Queries) CreateWalletTopup(ctx context.Context, arg CreateWalletTopupPa
 		arg.AccountNumberNonceSnapshot,
 		arg.AccountKeyVersionSnapshot,
 		arg.AccountLast4Snapshot,
+		arg.PaymentEnvironment,
 	)
 	var i WalletTopupIntent
 	err := row.Scan(
@@ -91,6 +95,7 @@ func (q *Queries) CreateWalletTopup(ctx context.Context, arg CreateWalletTopupPa
 		&i.Version,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.PaymentEnvironment,
 	)
 	return i, err
 }
@@ -118,7 +123,7 @@ func (q *Queries) EnsureWalletAccount(ctx context.Context, userID int64) (Wallet
 }
 
 const findWalletTopupByIdempotency = `-- name: FindWalletTopupByIdempotency :one
-SELECT id, user_id, wallet_account_id, amount_vnd, currency, payment_reference, idempotency_key, status, expires_at, credited_at, bank_account_id, bank_bin_snapshot, bank_name_snapshot, bank_display_name_snapshot, bank_account_name_snapshot, encrypted_account_number_snapshot, account_number_nonce_snapshot, account_encryption_format_snapshot, account_key_version_snapshot, account_last4_snapshot, version, created_at, updated_at FROM wallet_topup_intents
+SELECT id, user_id, wallet_account_id, amount_vnd, currency, payment_reference, idempotency_key, status, expires_at, credited_at, bank_account_id, bank_bin_snapshot, bank_name_snapshot, bank_display_name_snapshot, bank_account_name_snapshot, encrypted_account_number_snapshot, account_number_nonce_snapshot, account_encryption_format_snapshot, account_key_version_snapshot, account_last4_snapshot, version, created_at, updated_at, payment_environment FROM wallet_topup_intents
 WHERE user_id = $1 AND idempotency_key = $2
 `
 
@@ -154,12 +159,13 @@ func (q *Queries) FindWalletTopupByIdempotency(ctx context.Context, arg FindWall
 		&i.Version,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.PaymentEnvironment,
 	)
 	return i, err
 }
 
 const findWalletTopupByReference = `-- name: FindWalletTopupByReference :one
-SELECT id, user_id, wallet_account_id, amount_vnd, currency, payment_reference, idempotency_key, status, expires_at, credited_at, bank_account_id, bank_bin_snapshot, bank_name_snapshot, bank_display_name_snapshot, bank_account_name_snapshot, encrypted_account_number_snapshot, account_number_nonce_snapshot, account_encryption_format_snapshot, account_key_version_snapshot, account_last4_snapshot, version, created_at, updated_at FROM wallet_topup_intents WHERE payment_reference = $1
+SELECT id, user_id, wallet_account_id, amount_vnd, currency, payment_reference, idempotency_key, status, expires_at, credited_at, bank_account_id, bank_bin_snapshot, bank_name_snapshot, bank_display_name_snapshot, bank_account_name_snapshot, encrypted_account_number_snapshot, account_number_nonce_snapshot, account_encryption_format_snapshot, account_key_version_snapshot, account_last4_snapshot, version, created_at, updated_at, payment_environment FROM wallet_topup_intents WHERE payment_reference = $1
 `
 
 func (q *Queries) FindWalletTopupByReference(ctx context.Context, paymentReference string) (WalletTopupIntent, error) {
@@ -189,6 +195,7 @@ func (q *Queries) FindWalletTopupByReference(ctx context.Context, paymentReferen
 		&i.Version,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.PaymentEnvironment,
 	)
 	return i, err
 }
@@ -330,7 +337,7 @@ func (q *Queries) ListWalletLedger(ctx context.Context, arg ListWalletLedgerPara
 }
 
 const listWalletTopupsByUser = `-- name: ListWalletTopupsByUser :many
-SELECT id, user_id, wallet_account_id, amount_vnd, currency, payment_reference, idempotency_key, status, expires_at, credited_at, bank_account_id, bank_bin_snapshot, bank_name_snapshot, bank_display_name_snapshot, bank_account_name_snapshot, encrypted_account_number_snapshot, account_number_nonce_snapshot, account_encryption_format_snapshot, account_key_version_snapshot, account_last4_snapshot, version, created_at, updated_at FROM wallet_topup_intents WHERE user_id = $1
+SELECT id, user_id, wallet_account_id, amount_vnd, currency, payment_reference, idempotency_key, status, expires_at, credited_at, bank_account_id, bank_bin_snapshot, bank_name_snapshot, bank_display_name_snapshot, bank_account_name_snapshot, encrypted_account_number_snapshot, account_number_nonce_snapshot, account_encryption_format_snapshot, account_key_version_snapshot, account_last4_snapshot, version, created_at, updated_at, payment_environment FROM wallet_topup_intents WHERE user_id = $1
 ORDER BY created_at DESC, id DESC
 LIMIT $3::integer OFFSET $2::integer
 `
@@ -374,6 +381,7 @@ func (q *Queries) ListWalletTopupsByUser(ctx context.Context, arg ListWalletTopu
 			&i.Version,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.PaymentEnvironment,
 		); err != nil {
 			return nil, err
 		}
@@ -405,7 +413,7 @@ func (q *Queries) LockWalletAccount(ctx context.Context, id int64) (WalletAccoun
 }
 
 const lockWalletTopupByReference = `-- name: LockWalletTopupByReference :one
-SELECT id, user_id, wallet_account_id, amount_vnd, currency, payment_reference, idempotency_key, status, expires_at, credited_at, bank_account_id, bank_bin_snapshot, bank_name_snapshot, bank_display_name_snapshot, bank_account_name_snapshot, encrypted_account_number_snapshot, account_number_nonce_snapshot, account_encryption_format_snapshot, account_key_version_snapshot, account_last4_snapshot, version, created_at, updated_at FROM wallet_topup_intents WHERE payment_reference = $1 FOR UPDATE
+SELECT id, user_id, wallet_account_id, amount_vnd, currency, payment_reference, idempotency_key, status, expires_at, credited_at, bank_account_id, bank_bin_snapshot, bank_name_snapshot, bank_display_name_snapshot, bank_account_name_snapshot, encrypted_account_number_snapshot, account_number_nonce_snapshot, account_encryption_format_snapshot, account_key_version_snapshot, account_last4_snapshot, version, created_at, updated_at, payment_environment FROM wallet_topup_intents WHERE payment_reference = $1 FOR UPDATE
 `
 
 func (q *Queries) LockWalletTopupByReference(ctx context.Context, paymentReference string) (WalletTopupIntent, error) {
@@ -435,6 +443,7 @@ func (q *Queries) LockWalletTopupByReference(ctx context.Context, paymentReferen
 		&i.Version,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.PaymentEnvironment,
 	)
 	return i, err
 }
@@ -443,7 +452,7 @@ const markWalletTopupCredited = `-- name: MarkWalletTopupCredited :one
 UPDATE wallet_topup_intents
 SET status = 'credited', credited_at = $1, version = version + 1
 WHERE id = $2 AND status = 'pending_payment' AND version = $3
-RETURNING id, user_id, wallet_account_id, amount_vnd, currency, payment_reference, idempotency_key, status, expires_at, credited_at, bank_account_id, bank_bin_snapshot, bank_name_snapshot, bank_display_name_snapshot, bank_account_name_snapshot, encrypted_account_number_snapshot, account_number_nonce_snapshot, account_encryption_format_snapshot, account_key_version_snapshot, account_last4_snapshot, version, created_at, updated_at
+RETURNING id, user_id, wallet_account_id, amount_vnd, currency, payment_reference, idempotency_key, status, expires_at, credited_at, bank_account_id, bank_bin_snapshot, bank_name_snapshot, bank_display_name_snapshot, bank_account_name_snapshot, encrypted_account_number_snapshot, account_number_nonce_snapshot, account_encryption_format_snapshot, account_key_version_snapshot, account_last4_snapshot, version, created_at, updated_at, payment_environment
 `
 
 type MarkWalletTopupCreditedParams struct {
@@ -479,6 +488,7 @@ func (q *Queries) MarkWalletTopupCredited(ctx context.Context, arg MarkWalletTop
 		&i.Version,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.PaymentEnvironment,
 	)
 	return i, err
 }
@@ -487,7 +497,7 @@ const markWalletTopupReview = `-- name: MarkWalletTopupReview :one
 UPDATE wallet_topup_intents
 SET status = 'payment_review', version = version + 1
 WHERE id = $1 AND status IN ('pending_payment', 'expired')
-RETURNING id, user_id, wallet_account_id, amount_vnd, currency, payment_reference, idempotency_key, status, expires_at, credited_at, bank_account_id, bank_bin_snapshot, bank_name_snapshot, bank_display_name_snapshot, bank_account_name_snapshot, encrypted_account_number_snapshot, account_number_nonce_snapshot, account_encryption_format_snapshot, account_key_version_snapshot, account_last4_snapshot, version, created_at, updated_at
+RETURNING id, user_id, wallet_account_id, amount_vnd, currency, payment_reference, idempotency_key, status, expires_at, credited_at, bank_account_id, bank_bin_snapshot, bank_name_snapshot, bank_display_name_snapshot, bank_account_name_snapshot, encrypted_account_number_snapshot, account_number_nonce_snapshot, account_encryption_format_snapshot, account_key_version_snapshot, account_last4_snapshot, version, created_at, updated_at, payment_environment
 `
 
 func (q *Queries) MarkWalletTopupReview(ctx context.Context, id int64) (WalletTopupIntent, error) {
@@ -517,6 +527,7 @@ func (q *Queries) MarkWalletTopupReview(ctx context.Context, id int64) (WalletTo
 		&i.Version,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.PaymentEnvironment,
 	)
 	return i, err
 }

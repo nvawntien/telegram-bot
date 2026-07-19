@@ -36,11 +36,12 @@ type WalletTopup struct {
 }
 
 type CreateWalletTopupCommand struct {
-	TelegramUserID int64
-	Amount         domain.Money
-	BankAccountID  int64
-	IdempotencyKey string
-	Meta           RequestMeta
+	TelegramUserID     int64
+	Amount             domain.Money
+	BankAccountID      int64
+	IdempotencyKey     string
+	Meta               RequestMeta
+	PaymentEnvironment string
 }
 
 type WalletOrderPaymentCommand struct {
@@ -94,10 +95,18 @@ type WalletService struct {
 	clock               func() time.Time
 	metrics             WalletMetrics
 	deliveryMaxAttempts int32
+	paymentEnvironment  string
 }
 
 func NewWalletService(repository WalletRepository, cipher BankAccountCipher, instructions PaymentInstructionGenerator, references PaymentReferenceGenerator, topupMin, topupMax domain.Money, topupExpiry, reservationTTL time.Duration, metrics WalletMetrics) *WalletService {
-	return &WalletService{repository: repository, cipher: cipher, instructions: instructions, references: references, topupMin: topupMin, topupMax: topupMax, topupExpiry: topupExpiry, reservationTTL: reservationTTL, clock: time.Now, metrics: metrics, deliveryMaxAttempts: DefaultDeliveryMaxAttempts}
+	return &WalletService{repository: repository, cipher: cipher, instructions: instructions, references: references, topupMin: topupMin, topupMax: topupMax, topupExpiry: topupExpiry, reservationTTL: reservationTTL, clock: time.Now, metrics: metrics, deliveryMaxAttempts: DefaultDeliveryMaxAttempts, paymentEnvironment: "production"}
+}
+
+func (s *WalletService) WithPaymentEnvironment(environment string) *WalletService {
+	if validPaymentEnvironment(environment) {
+		s.paymentEnvironment = environment
+	}
+	return s
 }
 
 func (s *WalletService) WithDeliveryMaxAttempts(maxAttempts int32) *WalletService {
@@ -127,6 +136,7 @@ func (s *WalletService) CreateTopup(ctx context.Context, command CreateWalletTop
 	if err != nil {
 		return WalletTopup{}, PaymentInstruction{}, false, err
 	}
+	command.PaymentEnvironment = s.paymentEnvironment
 	topup, duplicate, err := s.repository.CreateWalletTopup(ctx, command, reference, s.clock().Add(s.topupExpiry))
 	if err != nil {
 		s.observeTopup("failed")

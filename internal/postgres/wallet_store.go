@@ -37,6 +37,9 @@ func (s *AppStore) EnsureWallet(ctx context.Context, telegramUserID int64) (app.
 }
 
 func (s *AppStore) CreateWalletTopup(ctx context.Context, command app.CreateWalletTopupCommand, reference string, expiresAt time.Time) (app.WalletTopup, bool, error) {
+	if command.PaymentEnvironment == "" {
+		command.PaymentEnvironment = "production"
+	}
 	var result app.WalletTopup
 	var duplicate bool
 	err := s.transactor.WithinTransaction(ctx, func(ctx context.Context, queries *generated.Queries) error {
@@ -77,6 +80,7 @@ func (s *AppStore) CreateWalletTopup(ctx context.Context, command app.CreateWall
 			BankDisplayNameSnapshot: bank.DisplayName, BankAccountNameSnapshot: bank.AccountName,
 			EncryptedAccountNumberSnapshot: bank.EncryptedAccountNumber, AccountNumberNonceSnapshot: bank.EncryptionNonce,
 			AccountKeyVersionSnapshot: bank.EncryptionKeyVersion, AccountLast4Snapshot: bank.DisplayLast4,
+			PaymentEnvironment: command.PaymentEnvironment,
 		})
 		if errors.Is(err, pgx.ErrNoRows) {
 			existing, findErr := queries.FindWalletTopupByIdempotency(ctx, generated.FindWalletTopupByIdempotencyParams{UserID: user.ID, IdempotencyKey: command.IdempotencyKey})
@@ -117,7 +121,7 @@ func (s *AppStore) PayOrderWithWallet(ctx context.Context, command app.WalletOrd
 			return err
 		}
 		transactionID := fmt.Sprintf("wallet-order-%d", order.ID)
-		existingPayment, paymentErr := queries.GetPaymentByProviderTransaction(ctx, generated.GetPaymentByProviderTransactionParams{Provider: "wallet", ProviderTransactionID: optionalText(transactionID)})
+		existingPayment, paymentErr := queries.GetPaymentByProviderTransaction(ctx, generated.GetPaymentByProviderTransactionParams{Provider: "wallet", PaymentEnvironment: order.PaymentEnvironment, ProviderTransactionID: optionalText(transactionID)})
 		if paymentErr == nil {
 			allocation, allocationErr := queries.GetPaymentAllocation(ctx, existingPayment.ID)
 			if allocationErr == nil && allocation.TargetType == "order" && allocation.TargetID == order.ID {
@@ -163,6 +167,7 @@ func (s *AppStore) PayOrderWithWallet(ctx context.Context, command app.WalletOrd
 			OrderID: requiredInt8(order.ID), UserID: user.ID, Purpose: "order", Provider: "wallet",
 			ProviderTransactionID: optionalText(transactionID), PaymentReference: order.PaymentReference,
 			AmountVnd: order.TotalVnd, Status: "confirmed", ConfirmedAt: requiredTimestamp(paidAt), OccurredAt: requiredTimestamp(paidAt),
+			PaymentEnvironment: order.PaymentEnvironment,
 		})
 		if err != nil {
 			return err
@@ -184,7 +189,7 @@ func (s *AppStore) PayOrderWithWallet(ctx context.Context, command app.WalletOrd
 		if err != nil {
 			return err
 		}
-		actor := app.AcceptPaymentCommand{Actor: app.PaymentActor{Type: "user", ID: user.ID}, RequestID: command.Meta.RequestID}
+		actor := app.AcceptPaymentCommand{Actor: app.PaymentActor{Type: "user", ID: user.ID}, RequestID: command.Meta.RequestID, Environment: order.PaymentEnvironment, Source: "manual"}
 		if err := insertPaymentOrderHistory(ctx, queries, actor, order.ID, domain.OrderStatusPendingPayment, domain.OrderStatusPaid, "wallet_payment_accepted"); err != nil {
 			return err
 		}

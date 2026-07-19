@@ -38,8 +38,8 @@ func NewPaymentWebhook(providers *payment.Registry, ingester PaymentEventIngeste
 func (w *PaymentWebhook) Handler() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		providerName := c.Param("provider")
-		verifier, ok := w.providers.Provider(providerName)
-		if !ok {
+		provider, providerErr := w.providers.GetWebhookProvider(providerName)
+		if providerErr != nil {
 			w.observeWebhook(providerName, "unknown_provider")
 			c.AbortWithStatusJSON(http.StatusNotFound, gin.H{"error": "payment provider not found"})
 			return
@@ -66,7 +66,9 @@ func (w *PaymentWebhook) Handler() gin.HandlerFunc {
 
 		requestContext, cancel := context.WithTimeout(c.Request.Context(), w.timeout)
 		defer cancel()
-		event, err := verifier.VerifyAndNormalize(requestContext, c.Request.Header, body)
+		event, acknowledgement, err := provider.VerifyAndNormalizeWebhook(requestContext, payment.WebhookRequest{
+			Headers: c.Request.Header.Clone(), RawBody: body, ReceivedAt: time.Now(),
+		})
 		if err != nil {
 			result := "malformed"
 			status := http.StatusBadRequest
@@ -97,8 +99,42 @@ func (w *PaymentWebhook) Handler() gin.HandlerFunc {
 		}
 		w.observeWebhook(providerName, ingestionResult)
 		w.observeIngested(providerName, ingestionResult)
-		c.JSON(http.StatusAccepted, gin.H{"status": "accepted", "duplicate": result.Duplicate})
+		if err := validateProviderAcknowledgement(acknowledgement); err != nil {
+			w.observeWebhook(providerName, "invalid_acknowledgement")
+			c.AbortWithStatusJSON(http.StatusServiceUnavailable, gin.H{"error": "payment provider acknowledgement unavailable"})
+			return
+		}
+		for name, value := range acknowledgement.Headers {
+			c.Header(name, value)
+		}
+		contentType := acknowledgement.Headers["Content-Type"]
+		responseBody := acknowledgement.Body
+		if result.Duplicate && len(acknowledgement.DuplicateBody) > 0 {
+			responseBody = acknowledgement.DuplicateBody
+		}
+		c.Data(acknowledgement.StatusCode, contentType, responseBody)
 	}
+}
+
+func validateProviderAcknowledgement(ack payment.WebhookAcknowledgement) error {
+	if ack.StatusCode < 200 || ack.StatusCode > 299 || len(ack.Body) > 4096 || len(ack.DuplicateBody) > 4096 || len(ack.Headers) == 0 {
+		return app.ErrInvalidInput
+	}
+	contentType := ""
+	for name, value := range ack.Headers {
+		canonical := http.CanonicalHeaderKey(strings.TrimSpace(name))
+		if canonical == "" || strings.ContainsAny(name+value, "\r\n") || len(value) > 512 || canonical == "Authorization" || canonical == "Set-Cookie" {
+			return app.ErrInvalidInput
+		}
+		if canonical == "Content-Type" {
+			contentType = value
+		}
+	}
+	mediaType, _, err := mime.ParseMediaType(contentType)
+	if err != nil || (mediaType != "application/json" && mediaType != "text/plain") {
+		return app.ErrInvalidInput
+	}
+	return nil
 }
 
 func (w *PaymentWebhook) observeWebhook(provider, result string) {

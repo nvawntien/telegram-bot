@@ -1599,7 +1599,7 @@ SET status = 'delivered',
 WHERE id = $2
   AND status = 'delivering'
   AND version = $3
-RETURNING id, user_id, status, currency, subtotal_vnd, total_vnd, payment_reference, idempotency_key, expires_at, paid_at, delivery_started_at, delivered_at, cancelled_at, version, created_at, updated_at, bank_account_id, bank_bin_snapshot, bank_name_snapshot, bank_display_name_snapshot, bank_account_name_snapshot, encrypted_account_number_snapshot, account_number_nonce_snapshot, account_encryption_format_snapshot, account_key_version_snapshot, account_last4_snapshot
+RETURNING id, user_id, status, currency, subtotal_vnd, total_vnd, payment_reference, idempotency_key, expires_at, paid_at, delivery_started_at, delivered_at, cancelled_at, version, created_at, updated_at, bank_account_id, bank_bin_snapshot, bank_name_snapshot, bank_display_name_snapshot, bank_account_name_snapshot, encrypted_account_number_snapshot, account_number_nonce_snapshot, account_encryption_format_snapshot, account_key_version_snapshot, account_last4_snapshot, payment_environment
 `
 
 type MarkOrderDeliveredGuardedParams struct {
@@ -1638,6 +1638,7 @@ func (q *Queries) MarkOrderDeliveredGuarded(ctx context.Context, arg MarkOrderDe
 		&i.AccountEncryptionFormatSnapshot,
 		&i.AccountKeyVersionSnapshot,
 		&i.AccountLast4Snapshot,
+		&i.PaymentEnvironment,
 	)
 	return i, err
 }
@@ -1650,7 +1651,7 @@ SET status = 'delivering',
 WHERE id = $2
   AND status = 'reserving'
   AND version = $3
-RETURNING id, user_id, status, currency, subtotal_vnd, total_vnd, payment_reference, idempotency_key, expires_at, paid_at, delivery_started_at, delivered_at, cancelled_at, version, created_at, updated_at, bank_account_id, bank_bin_snapshot, bank_name_snapshot, bank_display_name_snapshot, bank_account_name_snapshot, encrypted_account_number_snapshot, account_number_nonce_snapshot, account_encryption_format_snapshot, account_key_version_snapshot, account_last4_snapshot
+RETURNING id, user_id, status, currency, subtotal_vnd, total_vnd, payment_reference, idempotency_key, expires_at, paid_at, delivery_started_at, delivered_at, cancelled_at, version, created_at, updated_at, bank_account_id, bank_bin_snapshot, bank_name_snapshot, bank_display_name_snapshot, bank_account_name_snapshot, encrypted_account_number_snapshot, account_number_nonce_snapshot, account_encryption_format_snapshot, account_key_version_snapshot, account_last4_snapshot, payment_environment
 `
 
 type MarkOrderDeliveringGuardedParams struct {
@@ -1689,6 +1690,7 @@ func (q *Queries) MarkOrderDeliveringGuarded(ctx context.Context, arg MarkOrderD
 		&i.AccountEncryptionFormatSnapshot,
 		&i.AccountKeyVersionSnapshot,
 		&i.AccountLast4Snapshot,
+		&i.PaymentEnvironment,
 	)
 	return i, err
 }
@@ -1699,7 +1701,7 @@ SET status = 'delivery_failed',
     version = version + 1
 WHERE id = $1
   AND status = 'delivering'
-RETURNING id, user_id, status, currency, subtotal_vnd, total_vnd, payment_reference, idempotency_key, expires_at, paid_at, delivery_started_at, delivered_at, cancelled_at, version, created_at, updated_at, bank_account_id, bank_bin_snapshot, bank_name_snapshot, bank_display_name_snapshot, bank_account_name_snapshot, encrypted_account_number_snapshot, account_number_nonce_snapshot, account_encryption_format_snapshot, account_key_version_snapshot, account_last4_snapshot
+RETURNING id, user_id, status, currency, subtotal_vnd, total_vnd, payment_reference, idempotency_key, expires_at, paid_at, delivery_started_at, delivered_at, cancelled_at, version, created_at, updated_at, bank_account_id, bank_bin_snapshot, bank_name_snapshot, bank_display_name_snapshot, bank_account_name_snapshot, encrypted_account_number_snapshot, account_number_nonce_snapshot, account_encryption_format_snapshot, account_key_version_snapshot, account_last4_snapshot, payment_environment
 `
 
 func (q *Queries) MarkOrderDeliveryFailedGuarded(ctx context.Context, orderID int64) (Order, error) {
@@ -1732,6 +1734,7 @@ func (q *Queries) MarkOrderDeliveryFailedGuarded(ctx context.Context, orderID in
 		&i.AccountEncryptionFormatSnapshot,
 		&i.AccountKeyVersionSnapshot,
 		&i.AccountLast4Snapshot,
+		&i.PaymentEnvironment,
 	)
 	return i, err
 }

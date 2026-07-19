@@ -90,6 +90,9 @@ func (tx *orderTransaction) GetActiveBankAccountForOrder(ctx context.Context, ba
 }
 
 func (tx *orderTransaction) InsertPendingOrder(ctx context.Context, input app.PendingOrderInsert) (app.OrderDetail, bool, error) {
+	if input.PaymentEnvironment == "" {
+		input.PaymentEnvironment = "production"
+	}
 	row, err := tx.queries.CreatePendingOrderWithBank(ctx, generated.CreatePendingOrderWithBankParams{
 		UserID: input.UserID, SubtotalVnd: input.LineTotal.Int64(), TotalVnd: input.LineTotal.Int64(),
 		PaymentReference: input.PaymentReference, IdempotencyKey: input.IdempotencyKey,
@@ -103,6 +106,7 @@ func (tx *orderTransaction) InsertPendingOrder(ctx context.Context, input app.Pe
 		AccountNumberNonceSnapshot:     append([]byte(nil), input.Bank.Protected.Nonce...),
 		AccountKeyVersionSnapshot:      pgtype.Int4{Int32: input.Bank.Protected.KeyVersion, Valid: true},
 		AccountLast4Snapshot:           pgtype.Text{String: input.Bank.Last4, Valid: true},
+		PaymentEnvironment:             input.PaymentEnvironment,
 	})
 	if errors.Is(err, pgx.ErrNoRows) {
 		return app.OrderDetail{}, false, nil

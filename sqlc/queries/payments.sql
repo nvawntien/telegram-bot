@@ -7,6 +7,13 @@ INSERT INTO payment_events (
     payload_hash,
     sanitized_payload,
     signature_verified,
+    payment_environment,
+    event_source,
+    transfer_direction,
+    transfer_content,
+    destination_account_identity,
+    provider_account_identity,
+    business_fingerprint,
     processing_status,
     max_attempts
 ) VALUES (
@@ -17,6 +24,13 @@ INSERT INTO payment_events (
     sqlc.arg(payload_hash),
     sqlc.arg(sanitized_payload),
     sqlc.arg(signature_verified),
+    sqlc.arg(payment_environment),
+    sqlc.arg(event_source),
+    sqlc.arg(transfer_direction),
+    sqlc.arg(transfer_content),
+    sqlc.narg(destination_account_identity),
+    sqlc.narg(provider_account_identity),
+    sqlc.arg(business_fingerprint),
     'received',
     sqlc.arg(max_attempts)
 )
@@ -26,6 +40,12 @@ RETURNING *;
 -- name: GetPaymentEventByProviderEventID :one
 SELECT * FROM payment_events
 WHERE provider = sqlc.arg(provider) AND external_event_id = sqlc.arg(external_event_id);
+
+-- name: GetPaymentEventByProviderTransactionID :one
+SELECT * FROM payment_events
+WHERE provider = sqlc.arg(provider)
+  AND payment_environment = sqlc.arg(payment_environment)
+  AND provider_transaction_id = sqlc.arg(provider_transaction_id);
 
 -- name: ClaimPaymentEvents :many
 WITH selected AS (
@@ -90,6 +110,7 @@ INSERT INTO payments (
     payment_reference,
     amount_vnd,
     currency,
+    payment_environment,
     status,
     confirmed_at,
     occurred_at
@@ -102,18 +123,21 @@ INSERT INTO payments (
     sqlc.arg(payment_reference),
     sqlc.arg(amount_vnd),
     'VND',
+    sqlc.arg(payment_environment),
     sqlc.arg(status),
     sqlc.narg(confirmed_at),
     sqlc.arg(occurred_at)
 )
-ON CONFLICT (provider, provider_transaction_id)
+ON CONFLICT (provider, payment_environment, provider_transaction_id)
 WHERE provider_transaction_id IS NOT NULL
 DO NOTHING
 RETURNING *;
 
 -- name: GetPaymentByProviderTransaction :one
 SELECT * FROM payments
-WHERE provider = sqlc.arg(provider) AND provider_transaction_id = sqlc.arg(provider_transaction_id);
+WHERE provider = sqlc.arg(provider)
+  AND payment_environment = sqlc.arg(payment_environment)
+  AND provider_transaction_id = sqlc.arg(provider_transaction_id);
 
 -- name: InsertPaymentAllocation :one
 INSERT INTO payment_allocations (payment_id, target_type, target_id, amount_vnd)
@@ -127,14 +151,39 @@ SELECT * FROM payment_allocations WHERE payment_id = sqlc.arg(payment_id);
 INSERT INTO payment_review_cases (
     payment_event_id, payment_id, order_id, wallet_topup_id,
     provider, provider_transaction_id, payment_reference, amount_vnd,
-    currency, occurred_at, reason
+    currency, occurred_at, reason, payment_environment, event_source,
+    provider_account_mapping_id, destination_account_identity
 ) VALUES (
     sqlc.narg(payment_event_id), sqlc.narg(payment_id), sqlc.narg(order_id),
     sqlc.narg(wallet_topup_id), sqlc.arg(provider), sqlc.narg(provider_transaction_id),
     sqlc.arg(payment_reference), sqlc.arg(amount_vnd), sqlc.arg(currency),
-    sqlc.arg(occurred_at), sqlc.arg(reason)
+    sqlc.arg(occurred_at), sqlc.arg(reason), sqlc.arg(payment_environment),
+    sqlc.arg(event_source), sqlc.narg(provider_account_mapping_id),
+    sqlc.narg(destination_account_identity)
 )
 ON CONFLICT (payment_event_id) DO UPDATE SET reason = EXCLUDED.reason
+RETURNING *;
+
+-- name: MarkPaymentEventReviewedBeforeAcceptance :one
+UPDATE payment_events
+SET processing_status = 'review',
+    processing_started_at = NULL,
+    processed_at = sqlc.arg(processed_at),
+    processing_error = sqlc.arg(processing_error),
+    last_error_code = sqlc.arg(last_error_code)
+WHERE id = sqlc.arg(id)
+  AND processing_status IN ('received', 'processing')
+RETURNING *;
+
+-- name: CompleteIgnoredPaymentEvent :one
+UPDATE payment_events
+SET processing_status = 'completed',
+    processing_started_at = NULL,
+    processed_at = sqlc.arg(processed_at),
+    processing_error = sqlc.arg(processing_error),
+    last_error_code = sqlc.arg(last_error_code)
+WHERE id = sqlc.arg(id)
+  AND processing_status = 'processing'
 RETURNING *;
 
 -- name: CountOpenPaymentReviews :one

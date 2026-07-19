@@ -33,7 +33,7 @@ SET processing_status = 'processing',
     last_error_code = NULL
 FROM selected
 WHERE event.id = selected.id
-RETURNING event.id, event.provider, event.external_event_id, event.provider_transaction_id, event.event_type, event.payload_hash, event.sanitized_payload, event.signature_verified, event.processing_status, event.processing_error, event.received_at, event.processed_at, event.created_at, event.updated_at, event.attempts, event.max_attempts, event.next_attempt_at, event.processing_started_at, event.last_error_code, event.related_order_id, event.related_wallet_topup_id
+RETURNING event.id, event.provider, event.external_event_id, event.provider_transaction_id, event.event_type, event.payload_hash, event.sanitized_payload, event.signature_verified, event.processing_status, event.processing_error, event.received_at, event.processed_at, event.created_at, event.updated_at, event.attempts, event.max_attempts, event.next_attempt_at, event.processing_started_at, event.last_error_code, event.related_order_id, event.related_wallet_topup_id, event.payment_environment, event.event_source, event.transfer_direction, event.transfer_content, event.destination_account_identity, event.provider_account_identity, event.provider_account_mapping_id, event.business_fingerprint
 `
 
 type ClaimPaymentEventsParams struct {
@@ -73,6 +73,14 @@ func (q *Queries) ClaimPaymentEvents(ctx context.Context, arg ClaimPaymentEvents
 			&i.LastErrorCode,
 			&i.RelatedOrderID,
 			&i.RelatedWalletTopupID,
+			&i.PaymentEnvironment,
+			&i.EventSource,
+			&i.TransferDirection,
+			&i.TransferContent,
+			&i.DestinationAccountIdentity,
+			&i.ProviderAccountIdentity,
+			&i.ProviderAccountMappingID,
+			&i.BusinessFingerprint,
 		); err != nil {
 			return nil, err
 		}
@@ -82,6 +90,67 @@ func (q *Queries) ClaimPaymentEvents(ctx context.Context, arg ClaimPaymentEvents
 		return nil, err
 	}
 	return items, nil
+}
+
+const completeIgnoredPaymentEvent = `-- name: CompleteIgnoredPaymentEvent :one
+UPDATE payment_events
+SET processing_status = 'completed',
+    processing_started_at = NULL,
+    processed_at = $1,
+    processing_error = $2,
+    last_error_code = $3
+WHERE id = $4
+  AND processing_status = 'processing'
+RETURNING id, provider, external_event_id, provider_transaction_id, event_type, payload_hash, sanitized_payload, signature_verified, processing_status, processing_error, received_at, processed_at, created_at, updated_at, attempts, max_attempts, next_attempt_at, processing_started_at, last_error_code, related_order_id, related_wallet_topup_id, payment_environment, event_source, transfer_direction, transfer_content, destination_account_identity, provider_account_identity, provider_account_mapping_id, business_fingerprint
+`
+
+type CompleteIgnoredPaymentEventParams struct {
+	ProcessedAt     pgtype.Timestamptz `db:"processed_at" json:"processed_at"`
+	ProcessingError pgtype.Text        `db:"processing_error" json:"processing_error"`
+	LastErrorCode   pgtype.Text        `db:"last_error_code" json:"last_error_code"`
+	ID              int64              `db:"id" json:"id"`
+}
+
+func (q *Queries) CompleteIgnoredPaymentEvent(ctx context.Context, arg CompleteIgnoredPaymentEventParams) (PaymentEvent, error) {
+	row := q.db.QueryRow(ctx, completeIgnoredPaymentEvent,
+		arg.ProcessedAt,
+		arg.ProcessingError,
+		arg.LastErrorCode,
+		arg.ID,
+	)
+	var i PaymentEvent
+	err := row.Scan(
+		&i.ID,
+		&i.Provider,
+		&i.ExternalEventID,
+		&i.ProviderTransactionID,
+		&i.EventType,
+		&i.PayloadHash,
+		&i.SanitizedPayload,
+		&i.SignatureVerified,
+		&i.ProcessingStatus,
+		&i.ProcessingError,
+		&i.ReceivedAt,
+		&i.ProcessedAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.Attempts,
+		&i.MaxAttempts,
+		&i.NextAttemptAt,
+		&i.ProcessingStartedAt,
+		&i.LastErrorCode,
+		&i.RelatedOrderID,
+		&i.RelatedWalletTopupID,
+		&i.PaymentEnvironment,
+		&i.EventSource,
+		&i.TransferDirection,
+		&i.TransferContent,
+		&i.DestinationAccountIdentity,
+		&i.ProviderAccountIdentity,
+		&i.ProviderAccountMappingID,
+		&i.BusinessFingerprint,
+	)
+	return i, err
 }
 
 const completePaymentEvent = `-- name: CompletePaymentEvent :one
@@ -94,7 +163,7 @@ SET processing_status = $1,
     processing_error = $5,
     last_error_code = $6
 WHERE id = $7 AND processing_status = 'processing'
-RETURNING id, provider, external_event_id, provider_transaction_id, event_type, payload_hash, sanitized_payload, signature_verified, processing_status, processing_error, received_at, processed_at, created_at, updated_at, attempts, max_attempts, next_attempt_at, processing_started_at, last_error_code, related_order_id, related_wallet_topup_id
+RETURNING id, provider, external_event_id, provider_transaction_id, event_type, payload_hash, sanitized_payload, signature_verified, processing_status, processing_error, received_at, processed_at, created_at, updated_at, attempts, max_attempts, next_attempt_at, processing_started_at, last_error_code, related_order_id, related_wallet_topup_id, payment_environment, event_source, transfer_direction, transfer_content, destination_account_identity, provider_account_identity, provider_account_mapping_id, business_fingerprint
 `
 
 type CompletePaymentEventParams struct {
@@ -140,6 +209,14 @@ func (q *Queries) CompletePaymentEvent(ctx context.Context, arg CompletePaymentE
 		&i.LastErrorCode,
 		&i.RelatedOrderID,
 		&i.RelatedWalletTopupID,
+		&i.PaymentEnvironment,
+		&i.EventSource,
+		&i.TransferDirection,
+		&i.TransferContent,
+		&i.DestinationAccountIdentity,
+		&i.ProviderAccountIdentity,
+		&i.ProviderAccountMappingID,
+		&i.BusinessFingerprint,
 	)
 	return i, err
 }
@@ -174,17 +251,20 @@ func (q *Queries) GetPaymentAllocation(ctx context.Context, paymentID int64) (Pa
 }
 
 const getPaymentByProviderTransaction = `-- name: GetPaymentByProviderTransaction :one
-SELECT id, order_id, user_id, purpose, provider, provider_transaction_id, payment_reference, amount_vnd, currency, status, confirmed_at, created_at, updated_at, occurred_at FROM payments
-WHERE provider = $1 AND provider_transaction_id = $2
+SELECT id, order_id, user_id, purpose, provider, provider_transaction_id, payment_reference, amount_vnd, currency, status, confirmed_at, created_at, updated_at, occurred_at, payment_environment FROM payments
+WHERE provider = $1
+  AND payment_environment = $2
+  AND provider_transaction_id = $3
 `
 
 type GetPaymentByProviderTransactionParams struct {
 	Provider              string      `db:"provider" json:"provider"`
+	PaymentEnvironment    string      `db:"payment_environment" json:"payment_environment"`
 	ProviderTransactionID pgtype.Text `db:"provider_transaction_id" json:"provider_transaction_id"`
 }
 
 func (q *Queries) GetPaymentByProviderTransaction(ctx context.Context, arg GetPaymentByProviderTransactionParams) (Payment, error) {
-	row := q.db.QueryRow(ctx, getPaymentByProviderTransaction, arg.Provider, arg.ProviderTransactionID)
+	row := q.db.QueryRow(ctx, getPaymentByProviderTransaction, arg.Provider, arg.PaymentEnvironment, arg.ProviderTransactionID)
 	var i Payment
 	err := row.Scan(
 		&i.ID,
@@ -201,12 +281,13 @@ func (q *Queries) GetPaymentByProviderTransaction(ctx context.Context, arg GetPa
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.OccurredAt,
+		&i.PaymentEnvironment,
 	)
 	return i, err
 }
 
 const getPaymentEventByID = `-- name: GetPaymentEventByID :one
-SELECT id, provider, external_event_id, provider_transaction_id, event_type, payload_hash, sanitized_payload, signature_verified, processing_status, processing_error, received_at, processed_at, created_at, updated_at, attempts, max_attempts, next_attempt_at, processing_started_at, last_error_code, related_order_id, related_wallet_topup_id FROM payment_events WHERE id = $1
+SELECT id, provider, external_event_id, provider_transaction_id, event_type, payload_hash, sanitized_payload, signature_verified, processing_status, processing_error, received_at, processed_at, created_at, updated_at, attempts, max_attempts, next_attempt_at, processing_started_at, last_error_code, related_order_id, related_wallet_topup_id, payment_environment, event_source, transfer_direction, transfer_content, destination_account_identity, provider_account_identity, provider_account_mapping_id, business_fingerprint FROM payment_events WHERE id = $1
 `
 
 func (q *Queries) GetPaymentEventByID(ctx context.Context, id int64) (PaymentEvent, error) {
@@ -234,12 +315,20 @@ func (q *Queries) GetPaymentEventByID(ctx context.Context, id int64) (PaymentEve
 		&i.LastErrorCode,
 		&i.RelatedOrderID,
 		&i.RelatedWalletTopupID,
+		&i.PaymentEnvironment,
+		&i.EventSource,
+		&i.TransferDirection,
+		&i.TransferContent,
+		&i.DestinationAccountIdentity,
+		&i.ProviderAccountIdentity,
+		&i.ProviderAccountMappingID,
+		&i.BusinessFingerprint,
 	)
 	return i, err
 }
 
 const getPaymentEventByProviderEventID = `-- name: GetPaymentEventByProviderEventID :one
-SELECT id, provider, external_event_id, provider_transaction_id, event_type, payload_hash, sanitized_payload, signature_verified, processing_status, processing_error, received_at, processed_at, created_at, updated_at, attempts, max_attempts, next_attempt_at, processing_started_at, last_error_code, related_order_id, related_wallet_topup_id FROM payment_events
+SELECT id, provider, external_event_id, provider_transaction_id, event_type, payload_hash, sanitized_payload, signature_verified, processing_status, processing_error, received_at, processed_at, created_at, updated_at, attempts, max_attempts, next_attempt_at, processing_started_at, last_error_code, related_order_id, related_wallet_topup_id, payment_environment, event_source, transfer_direction, transfer_content, destination_account_identity, provider_account_identity, provider_account_mapping_id, business_fingerprint FROM payment_events
 WHERE provider = $1 AND external_event_id = $2
 `
 
@@ -273,6 +362,64 @@ func (q *Queries) GetPaymentEventByProviderEventID(ctx context.Context, arg GetP
 		&i.LastErrorCode,
 		&i.RelatedOrderID,
 		&i.RelatedWalletTopupID,
+		&i.PaymentEnvironment,
+		&i.EventSource,
+		&i.TransferDirection,
+		&i.TransferContent,
+		&i.DestinationAccountIdentity,
+		&i.ProviderAccountIdentity,
+		&i.ProviderAccountMappingID,
+		&i.BusinessFingerprint,
+	)
+	return i, err
+}
+
+const getPaymentEventByProviderTransactionID = `-- name: GetPaymentEventByProviderTransactionID :one
+SELECT id, provider, external_event_id, provider_transaction_id, event_type, payload_hash, sanitized_payload, signature_verified, processing_status, processing_error, received_at, processed_at, created_at, updated_at, attempts, max_attempts, next_attempt_at, processing_started_at, last_error_code, related_order_id, related_wallet_topup_id, payment_environment, event_source, transfer_direction, transfer_content, destination_account_identity, provider_account_identity, provider_account_mapping_id, business_fingerprint FROM payment_events
+WHERE provider = $1
+  AND payment_environment = $2
+  AND provider_transaction_id = $3
+`
+
+type GetPaymentEventByProviderTransactionIDParams struct {
+	Provider              string      `db:"provider" json:"provider"`
+	PaymentEnvironment    string      `db:"payment_environment" json:"payment_environment"`
+	ProviderTransactionID pgtype.Text `db:"provider_transaction_id" json:"provider_transaction_id"`
+}
+
+func (q *Queries) GetPaymentEventByProviderTransactionID(ctx context.Context, arg GetPaymentEventByProviderTransactionIDParams) (PaymentEvent, error) {
+	row := q.db.QueryRow(ctx, getPaymentEventByProviderTransactionID, arg.Provider, arg.PaymentEnvironment, arg.ProviderTransactionID)
+	var i PaymentEvent
+	err := row.Scan(
+		&i.ID,
+		&i.Provider,
+		&i.ExternalEventID,
+		&i.ProviderTransactionID,
+		&i.EventType,
+		&i.PayloadHash,
+		&i.SanitizedPayload,
+		&i.SignatureVerified,
+		&i.ProcessingStatus,
+		&i.ProcessingError,
+		&i.ReceivedAt,
+		&i.ProcessedAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.Attempts,
+		&i.MaxAttempts,
+		&i.NextAttemptAt,
+		&i.ProcessingStartedAt,
+		&i.LastErrorCode,
+		&i.RelatedOrderID,
+		&i.RelatedWalletTopupID,
+		&i.PaymentEnvironment,
+		&i.EventSource,
+		&i.TransferDirection,
+		&i.TransferContent,
+		&i.DestinationAccountIdentity,
+		&i.ProviderAccountIdentity,
+		&i.ProviderAccountMappingID,
+		&i.BusinessFingerprint,
 	)
 	return i, err
 }
@@ -287,6 +434,7 @@ INSERT INTO payments (
     payment_reference,
     amount_vnd,
     currency,
+    payment_environment,
     status,
     confirmed_at,
     occurred_at
@@ -301,12 +449,13 @@ INSERT INTO payments (
     'VND',
     $8,
     $9,
-    $10
+    $10,
+    $11
 )
-ON CONFLICT (provider, provider_transaction_id)
+ON CONFLICT (provider, payment_environment, provider_transaction_id)
 WHERE provider_transaction_id IS NOT NULL
 DO NOTHING
-RETURNING id, order_id, user_id, purpose, provider, provider_transaction_id, payment_reference, amount_vnd, currency, status, confirmed_at, created_at, updated_at, occurred_at
+RETURNING id, order_id, user_id, purpose, provider, provider_transaction_id, payment_reference, amount_vnd, currency, status, confirmed_at, created_at, updated_at, occurred_at, payment_environment
 `
 
 type InsertPaymentParams struct {
@@ -317,6 +466,7 @@ type InsertPaymentParams struct {
 	ProviderTransactionID pgtype.Text        `db:"provider_transaction_id" json:"provider_transaction_id"`
 	PaymentReference      string             `db:"payment_reference" json:"payment_reference"`
 	AmountVnd             int64              `db:"amount_vnd" json:"amount_vnd"`
+	PaymentEnvironment    string             `db:"payment_environment" json:"payment_environment"`
 	Status                string             `db:"status" json:"status"`
 	ConfirmedAt           pgtype.Timestamptz `db:"confirmed_at" json:"confirmed_at"`
 	OccurredAt            pgtype.Timestamptz `db:"occurred_at" json:"occurred_at"`
@@ -331,6 +481,7 @@ func (q *Queries) InsertPayment(ctx context.Context, arg InsertPaymentParams) (P
 		arg.ProviderTransactionID,
 		arg.PaymentReference,
 		arg.AmountVnd,
+		arg.PaymentEnvironment,
 		arg.Status,
 		arg.ConfirmedAt,
 		arg.OccurredAt,
@@ -351,6 +502,7 @@ func (q *Queries) InsertPayment(ctx context.Context, arg InsertPaymentParams) (P
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.OccurredAt,
+		&i.PaymentEnvironment,
 	)
 	return i, err
 }
@@ -396,6 +548,13 @@ INSERT INTO payment_events (
     payload_hash,
     sanitized_payload,
     signature_verified,
+    payment_environment,
+    event_source,
+    transfer_direction,
+    transfer_content,
+    destination_account_identity,
+    provider_account_identity,
+    business_fingerprint,
     processing_status,
     max_attempts
 ) VALUES (
@@ -406,22 +565,36 @@ INSERT INTO payment_events (
     $5,
     $6,
     $7,
+    $8,
+    $9,
+    $10,
+    $11,
+    $12,
+    $13,
+    $14,
     'received',
-    $8
+    $15
 )
 ON CONFLICT (provider, external_event_id) DO NOTHING
-RETURNING id, provider, external_event_id, provider_transaction_id, event_type, payload_hash, sanitized_payload, signature_verified, processing_status, processing_error, received_at, processed_at, created_at, updated_at, attempts, max_attempts, next_attempt_at, processing_started_at, last_error_code, related_order_id, related_wallet_topup_id
+RETURNING id, provider, external_event_id, provider_transaction_id, event_type, payload_hash, sanitized_payload, signature_verified, processing_status, processing_error, received_at, processed_at, created_at, updated_at, attempts, max_attempts, next_attempt_at, processing_started_at, last_error_code, related_order_id, related_wallet_topup_id, payment_environment, event_source, transfer_direction, transfer_content, destination_account_identity, provider_account_identity, provider_account_mapping_id, business_fingerprint
 `
 
 type InsertPaymentEventParams struct {
-	Provider              string      `db:"provider" json:"provider"`
-	ExternalEventID       string      `db:"external_event_id" json:"external_event_id"`
-	ProviderTransactionID pgtype.Text `db:"provider_transaction_id" json:"provider_transaction_id"`
-	EventType             string      `db:"event_type" json:"event_type"`
-	PayloadHash           []byte      `db:"payload_hash" json:"payload_hash"`
-	SanitizedPayload      []byte      `db:"sanitized_payload" json:"sanitized_payload"`
-	SignatureVerified     bool        `db:"signature_verified" json:"signature_verified"`
-	MaxAttempts           int32       `db:"max_attempts" json:"max_attempts"`
+	Provider                   string      `db:"provider" json:"provider"`
+	ExternalEventID            string      `db:"external_event_id" json:"external_event_id"`
+	ProviderTransactionID      pgtype.Text `db:"provider_transaction_id" json:"provider_transaction_id"`
+	EventType                  string      `db:"event_type" json:"event_type"`
+	PayloadHash                []byte      `db:"payload_hash" json:"payload_hash"`
+	SanitizedPayload           []byte      `db:"sanitized_payload" json:"sanitized_payload"`
+	SignatureVerified          bool        `db:"signature_verified" json:"signature_verified"`
+	PaymentEnvironment         string      `db:"payment_environment" json:"payment_environment"`
+	EventSource                string      `db:"event_source" json:"event_source"`
+	TransferDirection          string      `db:"transfer_direction" json:"transfer_direction"`
+	TransferContent            string      `db:"transfer_content" json:"transfer_content"`
+	DestinationAccountIdentity pgtype.Text `db:"destination_account_identity" json:"destination_account_identity"`
+	ProviderAccountIdentity    pgtype.Text `db:"provider_account_identity" json:"provider_account_identity"`
+	BusinessFingerprint        []byte      `db:"business_fingerprint" json:"business_fingerprint"`
+	MaxAttempts                int32       `db:"max_attempts" json:"max_attempts"`
 }
 
 func (q *Queries) InsertPaymentEvent(ctx context.Context, arg InsertPaymentEventParams) (PaymentEvent, error) {
@@ -433,6 +606,13 @@ func (q *Queries) InsertPaymentEvent(ctx context.Context, arg InsertPaymentEvent
 		arg.PayloadHash,
 		arg.SanitizedPayload,
 		arg.SignatureVerified,
+		arg.PaymentEnvironment,
+		arg.EventSource,
+		arg.TransferDirection,
+		arg.TransferContent,
+		arg.DestinationAccountIdentity,
+		arg.ProviderAccountIdentity,
+		arg.BusinessFingerprint,
 		arg.MaxAttempts,
 	)
 	var i PaymentEvent
@@ -458,6 +638,14 @@ func (q *Queries) InsertPaymentEvent(ctx context.Context, arg InsertPaymentEvent
 		&i.LastErrorCode,
 		&i.RelatedOrderID,
 		&i.RelatedWalletTopupID,
+		&i.PaymentEnvironment,
+		&i.EventSource,
+		&i.TransferDirection,
+		&i.TransferContent,
+		&i.DestinationAccountIdentity,
+		&i.ProviderAccountIdentity,
+		&i.ProviderAccountMappingID,
+		&i.BusinessFingerprint,
 	)
 	return i, err
 }
@@ -466,29 +654,36 @@ const insertPaymentReviewCase = `-- name: InsertPaymentReviewCase :one
 INSERT INTO payment_review_cases (
     payment_event_id, payment_id, order_id, wallet_topup_id,
     provider, provider_transaction_id, payment_reference, amount_vnd,
-    currency, occurred_at, reason
+    currency, occurred_at, reason, payment_environment, event_source,
+    provider_account_mapping_id, destination_account_identity
 ) VALUES (
     $1, $2, $3,
     $4, $5, $6,
     $7, $8, $9,
-    $10, $11
+    $10, $11, $12,
+    $13, $14,
+    $15
 )
 ON CONFLICT (payment_event_id) DO UPDATE SET reason = EXCLUDED.reason
-RETURNING id, payment_event_id, payment_id, order_id, wallet_topup_id, provider, provider_transaction_id, payment_reference, amount_vnd, currency, occurred_at, reason, status, resolution_note, resolved_by_admin_id, resolved_at, created_at, updated_at
+RETURNING id, payment_event_id, payment_id, order_id, wallet_topup_id, provider, provider_transaction_id, payment_reference, amount_vnd, currency, occurred_at, reason, status, resolution_note, resolved_by_admin_id, resolved_at, created_at, updated_at, payment_environment, event_source, provider_account_mapping_id, destination_account_identity
 `
 
 type InsertPaymentReviewCaseParams struct {
-	PaymentEventID        pgtype.Int8        `db:"payment_event_id" json:"payment_event_id"`
-	PaymentID             pgtype.Int8        `db:"payment_id" json:"payment_id"`
-	OrderID               pgtype.Int8        `db:"order_id" json:"order_id"`
-	WalletTopupID         pgtype.Int8        `db:"wallet_topup_id" json:"wallet_topup_id"`
-	Provider              string             `db:"provider" json:"provider"`
-	ProviderTransactionID pgtype.Text        `db:"provider_transaction_id" json:"provider_transaction_id"`
-	PaymentReference      string             `db:"payment_reference" json:"payment_reference"`
-	AmountVnd             int64              `db:"amount_vnd" json:"amount_vnd"`
-	Currency              string             `db:"currency" json:"currency"`
-	OccurredAt            pgtype.Timestamptz `db:"occurred_at" json:"occurred_at"`
-	Reason                string             `db:"reason" json:"reason"`
+	PaymentEventID             pgtype.Int8        `db:"payment_event_id" json:"payment_event_id"`
+	PaymentID                  pgtype.Int8        `db:"payment_id" json:"payment_id"`
+	OrderID                    pgtype.Int8        `db:"order_id" json:"order_id"`
+	WalletTopupID              pgtype.Int8        `db:"wallet_topup_id" json:"wallet_topup_id"`
+	Provider                   string             `db:"provider" json:"provider"`
+	ProviderTransactionID      pgtype.Text        `db:"provider_transaction_id" json:"provider_transaction_id"`
+	PaymentReference           string             `db:"payment_reference" json:"payment_reference"`
+	AmountVnd                  int64              `db:"amount_vnd" json:"amount_vnd"`
+	Currency                   string             `db:"currency" json:"currency"`
+	OccurredAt                 pgtype.Timestamptz `db:"occurred_at" json:"occurred_at"`
+	Reason                     string             `db:"reason" json:"reason"`
+	PaymentEnvironment         string             `db:"payment_environment" json:"payment_environment"`
+	EventSource                string             `db:"event_source" json:"event_source"`
+	ProviderAccountMappingID   pgtype.Int8        `db:"provider_account_mapping_id" json:"provider_account_mapping_id"`
+	DestinationAccountIdentity pgtype.Text        `db:"destination_account_identity" json:"destination_account_identity"`
 }
 
 func (q *Queries) InsertPaymentReviewCase(ctx context.Context, arg InsertPaymentReviewCaseParams) (PaymentReviewCase, error) {
@@ -504,6 +699,10 @@ func (q *Queries) InsertPaymentReviewCase(ctx context.Context, arg InsertPayment
 		arg.Currency,
 		arg.OccurredAt,
 		arg.Reason,
+		arg.PaymentEnvironment,
+		arg.EventSource,
+		arg.ProviderAccountMappingID,
+		arg.DestinationAccountIdentity,
 	)
 	var i PaymentReviewCase
 	err := row.Scan(
@@ -525,12 +724,16 @@ func (q *Queries) InsertPaymentReviewCase(ctx context.Context, arg InsertPayment
 		&i.ResolvedAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.PaymentEnvironment,
+		&i.EventSource,
+		&i.ProviderAccountMappingID,
+		&i.DestinationAccountIdentity,
 	)
 	return i, err
 }
 
 const listOpenPaymentReviews = `-- name: ListOpenPaymentReviews :many
-SELECT id, payment_event_id, payment_id, order_id, wallet_topup_id, provider, provider_transaction_id, payment_reference, amount_vnd, currency, occurred_at, reason, status, resolution_note, resolved_by_admin_id, resolved_at, created_at, updated_at FROM payment_review_cases
+SELECT id, payment_event_id, payment_id, order_id, wallet_topup_id, provider, provider_transaction_id, payment_reference, amount_vnd, currency, occurred_at, reason, status, resolution_note, resolved_by_admin_id, resolved_at, created_at, updated_at, payment_environment, event_source, provider_account_mapping_id, destination_account_identity FROM payment_review_cases
 WHERE status IN ('open', 'held')
 ORDER BY created_at, id
 LIMIT $2::integer OFFSET $1::integer
@@ -569,6 +772,10 @@ func (q *Queries) ListOpenPaymentReviews(ctx context.Context, arg ListOpenPaymen
 			&i.ResolvedAt,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.PaymentEnvironment,
+			&i.EventSource,
+			&i.ProviderAccountMappingID,
+			&i.DestinationAccountIdentity,
 		); err != nil {
 			return nil, err
 		}
@@ -581,7 +788,7 @@ func (q *Queries) ListOpenPaymentReviews(ctx context.Context, arg ListOpenPaymen
 }
 
 const lockPaymentEvent = `-- name: LockPaymentEvent :one
-SELECT id, provider, external_event_id, provider_transaction_id, event_type, payload_hash, sanitized_payload, signature_verified, processing_status, processing_error, received_at, processed_at, created_at, updated_at, attempts, max_attempts, next_attempt_at, processing_started_at, last_error_code, related_order_id, related_wallet_topup_id FROM payment_events WHERE id = $1 FOR UPDATE
+SELECT id, provider, external_event_id, provider_transaction_id, event_type, payload_hash, sanitized_payload, signature_verified, processing_status, processing_error, received_at, processed_at, created_at, updated_at, attempts, max_attempts, next_attempt_at, processing_started_at, last_error_code, related_order_id, related_wallet_topup_id, payment_environment, event_source, transfer_direction, transfer_content, destination_account_identity, provider_account_identity, provider_account_mapping_id, business_fingerprint FROM payment_events WHERE id = $1 FOR UPDATE
 `
 
 func (q *Queries) LockPaymentEvent(ctx context.Context, id int64) (PaymentEvent, error) {
@@ -609,6 +816,75 @@ func (q *Queries) LockPaymentEvent(ctx context.Context, id int64) (PaymentEvent,
 		&i.LastErrorCode,
 		&i.RelatedOrderID,
 		&i.RelatedWalletTopupID,
+		&i.PaymentEnvironment,
+		&i.EventSource,
+		&i.TransferDirection,
+		&i.TransferContent,
+		&i.DestinationAccountIdentity,
+		&i.ProviderAccountIdentity,
+		&i.ProviderAccountMappingID,
+		&i.BusinessFingerprint,
+	)
+	return i, err
+}
+
+const markPaymentEventReviewedBeforeAcceptance = `-- name: MarkPaymentEventReviewedBeforeAcceptance :one
+UPDATE payment_events
+SET processing_status = 'review',
+    processing_started_at = NULL,
+    processed_at = $1,
+    processing_error = $2,
+    last_error_code = $3
+WHERE id = $4
+  AND processing_status IN ('received', 'processing')
+RETURNING id, provider, external_event_id, provider_transaction_id, event_type, payload_hash, sanitized_payload, signature_verified, processing_status, processing_error, received_at, processed_at, created_at, updated_at, attempts, max_attempts, next_attempt_at, processing_started_at, last_error_code, related_order_id, related_wallet_topup_id, payment_environment, event_source, transfer_direction, transfer_content, destination_account_identity, provider_account_identity, provider_account_mapping_id, business_fingerprint
+`
+
+type MarkPaymentEventReviewedBeforeAcceptanceParams struct {
+	ProcessedAt     pgtype.Timestamptz `db:"processed_at" json:"processed_at"`
+	ProcessingError pgtype.Text        `db:"processing_error" json:"processing_error"`
+	LastErrorCode   pgtype.Text        `db:"last_error_code" json:"last_error_code"`
+	ID              int64              `db:"id" json:"id"`
+}
+
+func (q *Queries) MarkPaymentEventReviewedBeforeAcceptance(ctx context.Context, arg MarkPaymentEventReviewedBeforeAcceptanceParams) (PaymentEvent, error) {
+	row := q.db.QueryRow(ctx, markPaymentEventReviewedBeforeAcceptance,
+		arg.ProcessedAt,
+		arg.ProcessingError,
+		arg.LastErrorCode,
+		arg.ID,
+	)
+	var i PaymentEvent
+	err := row.Scan(
+		&i.ID,
+		&i.Provider,
+		&i.ExternalEventID,
+		&i.ProviderTransactionID,
+		&i.EventType,
+		&i.PayloadHash,
+		&i.SanitizedPayload,
+		&i.SignatureVerified,
+		&i.ProcessingStatus,
+		&i.ProcessingError,
+		&i.ReceivedAt,
+		&i.ProcessedAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.Attempts,
+		&i.MaxAttempts,
+		&i.NextAttemptAt,
+		&i.ProcessingStartedAt,
+		&i.LastErrorCode,
+		&i.RelatedOrderID,
+		&i.RelatedWalletTopupID,
+		&i.PaymentEnvironment,
+		&i.EventSource,
+		&i.TransferDirection,
+		&i.TransferContent,
+		&i.DestinationAccountIdentity,
+		&i.ProviderAccountIdentity,
+		&i.ProviderAccountMappingID,
+		&i.BusinessFingerprint,
 	)
 	return i, err
 }
@@ -619,7 +895,7 @@ SET status = $1, resolution_note = $2,
     resolved_by_admin_id = CASE WHEN $1::text = 'resolved' THEN $3 ELSE NULL END,
     resolved_at = CASE WHEN $1::text = 'resolved' THEN clock_timestamp() ELSE NULL END
 WHERE id = $4 AND status IN ('open', 'held')
-RETURNING id, payment_event_id, payment_id, order_id, wallet_topup_id, provider, provider_transaction_id, payment_reference, amount_vnd, currency, occurred_at, reason, status, resolution_note, resolved_by_admin_id, resolved_at, created_at, updated_at
+RETURNING id, payment_event_id, payment_id, order_id, wallet_topup_id, provider, provider_transaction_id, payment_reference, amount_vnd, currency, occurred_at, reason, status, resolution_note, resolved_by_admin_id, resolved_at, created_at, updated_at, payment_environment, event_source, provider_account_mapping_id, destination_account_identity
 `
 
 type ResolvePaymentReviewParams struct {
@@ -656,6 +932,10 @@ func (q *Queries) ResolvePaymentReview(ctx context.Context, arg ResolvePaymentRe
 		&i.ResolvedAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.PaymentEnvironment,
+		&i.EventSource,
+		&i.ProviderAccountMappingID,
+		&i.DestinationAccountIdentity,
 	)
 	return i, err
 }
@@ -669,7 +949,7 @@ SET processing_status = CASE WHEN attempts >= max_attempts THEN 'failed' ELSE 'r
     processing_error = $3,
     last_error_code = $4
 WHERE id = $5 AND processing_status = 'processing'
-RETURNING id, provider, external_event_id, provider_transaction_id, event_type, payload_hash, sanitized_payload, signature_verified, processing_status, processing_error, received_at, processed_at, created_at, updated_at, attempts, max_attempts, next_attempt_at, processing_started_at, last_error_code, related_order_id, related_wallet_topup_id
+RETURNING id, provider, external_event_id, provider_transaction_id, event_type, payload_hash, sanitized_payload, signature_verified, processing_status, processing_error, received_at, processed_at, created_at, updated_at, attempts, max_attempts, next_attempt_at, processing_started_at, last_error_code, related_order_id, related_wallet_topup_id, payment_environment, event_source, transfer_direction, transfer_content, destination_account_identity, provider_account_identity, provider_account_mapping_id, business_fingerprint
 `
 
 type SchedulePaymentEventRetryParams struct {
@@ -711,6 +991,14 @@ func (q *Queries) SchedulePaymentEventRetry(ctx context.Context, arg SchedulePay
 		&i.LastErrorCode,
 		&i.RelatedOrderID,
 		&i.RelatedWalletTopupID,
+		&i.PaymentEnvironment,
+		&i.EventSource,
+		&i.TransferDirection,
+		&i.TransferContent,
+		&i.DestinationAccountIdentity,
+		&i.ProviderAccountIdentity,
+		&i.ProviderAccountMappingID,
+		&i.BusinessFingerprint,
 	)
 	return i, err
 }

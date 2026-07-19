@@ -23,8 +23,8 @@ func TestMigrationCycle(t *testing.T) {
 	if err != nil {
 		t.Fatalf("get migrated version: %v", err)
 	}
-	if version != 18 {
-		t.Fatalf("migration version = %d, want 18", version)
+	if version != 19 {
+		t.Fatalf("migration version = %d, want 19", version)
 	}
 	if err := goose.DownToContext(ctx, database.sqlDB, database.migrations, 0); err != nil {
 		t.Fatalf("migrate down to zero: %v", err)

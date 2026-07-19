@@ -49,14 +49,16 @@ INSERT INTO wallet_topup_intents (
     idempotency_key, expires_at, bank_account_id, bank_bin_snapshot,
     bank_name_snapshot, bank_display_name_snapshot, bank_account_name_snapshot,
     encrypted_account_number_snapshot, account_number_nonce_snapshot,
-    account_encryption_format_snapshot, account_key_version_snapshot, account_last4_snapshot
+    account_encryption_format_snapshot, account_key_version_snapshot, account_last4_snapshot,
+    payment_environment
 ) VALUES (
     sqlc.arg(user_id), sqlc.arg(wallet_account_id), sqlc.arg(amount_vnd),
     sqlc.arg(payment_reference), sqlc.arg(idempotency_key), sqlc.arg(expires_at),
     sqlc.arg(bank_account_id), sqlc.arg(bank_bin_snapshot), sqlc.arg(bank_name_snapshot),
     sqlc.arg(bank_display_name_snapshot), sqlc.arg(bank_account_name_snapshot),
     sqlc.arg(encrypted_account_number_snapshot), sqlc.arg(account_number_nonce_snapshot),
-    'aes-256-gcm-v1', sqlc.arg(account_key_version_snapshot), sqlc.arg(account_last4_snapshot)
+    'aes-256-gcm-v1', sqlc.arg(account_key_version_snapshot), sqlc.arg(account_last4_snapshot),
+    COALESCE(NULLIF(sqlc.arg(payment_environment), ''), 'production')
 )
 ON CONFLICT DO NOTHING
 RETURNING *;

@@ -173,6 +173,7 @@ type Order struct {
 	AccountEncryptionFormatSnapshot pgtype.Text        `db:"account_encryption_format_snapshot" json:"account_encryption_format_snapshot"`
 	AccountKeyVersionSnapshot       pgtype.Int4        `db:"account_key_version_snapshot" json:"account_key_version_snapshot"`
 	AccountLast4Snapshot            pgtype.Text        `db:"account_last4_snapshot" json:"account_last4_snapshot"`
+	PaymentEnvironment              string             `db:"payment_environment" json:"payment_environment"`
 }
 
 type OrderInventoryItem struct {
@@ -254,6 +255,7 @@ type Payment struct {
 	CreatedAt             pgtype.Timestamptz `db:"created_at" json:"created_at"`
 	UpdatedAt             pgtype.Timestamptz `db:"updated_at" json:"updated_at"`
 	OccurredAt            pgtype.Timestamptz `db:"occurred_at" json:"occurred_at"`
+	PaymentEnvironment    string             `db:"payment_environment" json:"payment_environment"`
 }
 
 type PaymentAllocation struct {
@@ -266,48 +268,89 @@ type PaymentAllocation struct {
 }
 
 type PaymentEvent struct {
-	ID                    int64              `db:"id" json:"id"`
-	Provider              string             `db:"provider" json:"provider"`
-	ExternalEventID       string             `db:"external_event_id" json:"external_event_id"`
-	ProviderTransactionID pgtype.Text        `db:"provider_transaction_id" json:"provider_transaction_id"`
-	EventType             string             `db:"event_type" json:"event_type"`
-	PayloadHash           []byte             `db:"payload_hash" json:"payload_hash"`
-	SanitizedPayload      []byte             `db:"sanitized_payload" json:"sanitized_payload"`
-	SignatureVerified     bool               `db:"signature_verified" json:"signature_verified"`
-	ProcessingStatus      string             `db:"processing_status" json:"processing_status"`
-	ProcessingError       pgtype.Text        `db:"processing_error" json:"processing_error"`
-	ReceivedAt            pgtype.Timestamptz `db:"received_at" json:"received_at"`
-	ProcessedAt           pgtype.Timestamptz `db:"processed_at" json:"processed_at"`
-	CreatedAt             pgtype.Timestamptz `db:"created_at" json:"created_at"`
-	UpdatedAt             pgtype.Timestamptz `db:"updated_at" json:"updated_at"`
-	Attempts              int32              `db:"attempts" json:"attempts"`
-	MaxAttempts           int32              `db:"max_attempts" json:"max_attempts"`
-	NextAttemptAt         pgtype.Timestamptz `db:"next_attempt_at" json:"next_attempt_at"`
-	ProcessingStartedAt   pgtype.Timestamptz `db:"processing_started_at" json:"processing_started_at"`
-	LastErrorCode         pgtype.Text        `db:"last_error_code" json:"last_error_code"`
-	RelatedOrderID        pgtype.Int8        `db:"related_order_id" json:"related_order_id"`
-	RelatedWalletTopupID  pgtype.Int8        `db:"related_wallet_topup_id" json:"related_wallet_topup_id"`
+	ID                         int64              `db:"id" json:"id"`
+	Provider                   string             `db:"provider" json:"provider"`
+	ExternalEventID            string             `db:"external_event_id" json:"external_event_id"`
+	ProviderTransactionID      pgtype.Text        `db:"provider_transaction_id" json:"provider_transaction_id"`
+	EventType                  string             `db:"event_type" json:"event_type"`
+	PayloadHash                []byte             `db:"payload_hash" json:"payload_hash"`
+	SanitizedPayload           []byte             `db:"sanitized_payload" json:"sanitized_payload"`
+	SignatureVerified          bool               `db:"signature_verified" json:"signature_verified"`
+	ProcessingStatus           string             `db:"processing_status" json:"processing_status"`
+	ProcessingError            pgtype.Text        `db:"processing_error" json:"processing_error"`
+	ReceivedAt                 pgtype.Timestamptz `db:"received_at" json:"received_at"`
+	ProcessedAt                pgtype.Timestamptz `db:"processed_at" json:"processed_at"`
+	CreatedAt                  pgtype.Timestamptz `db:"created_at" json:"created_at"`
+	UpdatedAt                  pgtype.Timestamptz `db:"updated_at" json:"updated_at"`
+	Attempts                   int32              `db:"attempts" json:"attempts"`
+	MaxAttempts                int32              `db:"max_attempts" json:"max_attempts"`
+	NextAttemptAt              pgtype.Timestamptz `db:"next_attempt_at" json:"next_attempt_at"`
+	ProcessingStartedAt        pgtype.Timestamptz `db:"processing_started_at" json:"processing_started_at"`
+	LastErrorCode              pgtype.Text        `db:"last_error_code" json:"last_error_code"`
+	RelatedOrderID             pgtype.Int8        `db:"related_order_id" json:"related_order_id"`
+	RelatedWalletTopupID       pgtype.Int8        `db:"related_wallet_topup_id" json:"related_wallet_topup_id"`
+	PaymentEnvironment         string             `db:"payment_environment" json:"payment_environment"`
+	EventSource                string             `db:"event_source" json:"event_source"`
+	TransferDirection          string             `db:"transfer_direction" json:"transfer_direction"`
+	TransferContent            string             `db:"transfer_content" json:"transfer_content"`
+	DestinationAccountIdentity pgtype.Text        `db:"destination_account_identity" json:"destination_account_identity"`
+	ProviderAccountIdentity    pgtype.Text        `db:"provider_account_identity" json:"provider_account_identity"`
+	ProviderAccountMappingID   pgtype.Int8        `db:"provider_account_mapping_id" json:"provider_account_mapping_id"`
+	BusinessFingerprint        []byte             `db:"business_fingerprint" json:"business_fingerprint"`
+}
+
+type PaymentProviderAccount struct {
+	ID                          int64              `db:"id" json:"id"`
+	Provider                    string             `db:"provider" json:"provider"`
+	Environment                 string             `db:"environment" json:"environment"`
+	ExternalAccountIdentity     string             `db:"external_account_identity" json:"external_account_identity"`
+	ExternalIdentityFingerprint []byte             `db:"external_identity_fingerprint" json:"external_identity_fingerprint"`
+	LocalBankAccountID          int64              `db:"local_bank_account_id" json:"local_bank_account_id"`
+	Status                      string             `db:"status" json:"status"`
+	Version                     int64              `db:"version" json:"version"`
+	CreatedAt                   pgtype.Timestamptz `db:"created_at" json:"created_at"`
+	UpdatedAt                   pgtype.Timestamptz `db:"updated_at" json:"updated_at"`
+}
+
+type PaymentProviderCheckpoint struct {
+	ID                        int64              `db:"id" json:"id"`
+	ProviderAccountID         int64              `db:"provider_account_id" json:"provider_account_id"`
+	CursorValue               pgtype.Text        `db:"cursor_value" json:"cursor_value"`
+	LastTransactionExternalID pgtype.Text        `db:"last_transaction_external_id" json:"last_transaction_external_id"`
+	LastOccurredAt            pgtype.Timestamptz `db:"last_occurred_at" json:"last_occurred_at"`
+	LastAttemptedAt           pgtype.Timestamptz `db:"last_attempted_at" json:"last_attempted_at"`
+	LastSuccessfulAt          pgtype.Timestamptz `db:"last_successful_at" json:"last_successful_at"`
+	LastErrorCode             pgtype.Text        `db:"last_error_code" json:"last_error_code"`
+	LeaseOwner                pgtype.Text        `db:"lease_owner" json:"lease_owner"`
+	LeaseExpiresAt            pgtype.Timestamptz `db:"lease_expires_at" json:"lease_expires_at"`
+	Version                   int64              `db:"version" json:"version"`
+	CreatedAt                 pgtype.Timestamptz `db:"created_at" json:"created_at"`
+	UpdatedAt                 pgtype.Timestamptz `db:"updated_at" json:"updated_at"`
 }
 
 type PaymentReviewCase struct {
-	ID                    int64              `db:"id" json:"id"`
-	PaymentEventID        pgtype.Int8        `db:"payment_event_id" json:"payment_event_id"`
-	PaymentID             pgtype.Int8        `db:"payment_id" json:"payment_id"`
-	OrderID               pgtype.Int8        `db:"order_id" json:"order_id"`
-	WalletTopupID         pgtype.Int8        `db:"wallet_topup_id" json:"wallet_topup_id"`
-	Provider              string             `db:"provider" json:"provider"`
-	ProviderTransactionID pgtype.Text        `db:"provider_transaction_id" json:"provider_transaction_id"`
-	PaymentReference      string             `db:"payment_reference" json:"payment_reference"`
-	AmountVnd             int64              `db:"amount_vnd" json:"amount_vnd"`
-	Currency              string             `db:"currency" json:"currency"`
-	OccurredAt            pgtype.Timestamptz `db:"occurred_at" json:"occurred_at"`
-	Reason                string             `db:"reason" json:"reason"`
-	Status                string             `db:"status" json:"status"`
-	ResolutionNote        pgtype.Text        `db:"resolution_note" json:"resolution_note"`
-	ResolvedByAdminID     pgtype.Int8        `db:"resolved_by_admin_id" json:"resolved_by_admin_id"`
-	ResolvedAt            pgtype.Timestamptz `db:"resolved_at" json:"resolved_at"`
-	CreatedAt             pgtype.Timestamptz `db:"created_at" json:"created_at"`
-	UpdatedAt             pgtype.Timestamptz `db:"updated_at" json:"updated_at"`
+	ID                         int64              `db:"id" json:"id"`
+	PaymentEventID             pgtype.Int8        `db:"payment_event_id" json:"payment_event_id"`
+	PaymentID                  pgtype.Int8        `db:"payment_id" json:"payment_id"`
+	OrderID                    pgtype.Int8        `db:"order_id" json:"order_id"`
+	WalletTopupID              pgtype.Int8        `db:"wallet_topup_id" json:"wallet_topup_id"`
+	Provider                   string             `db:"provider" json:"provider"`
+	ProviderTransactionID      pgtype.Text        `db:"provider_transaction_id" json:"provider_transaction_id"`
+	PaymentReference           string             `db:"payment_reference" json:"payment_reference"`
+	AmountVnd                  int64              `db:"amount_vnd" json:"amount_vnd"`
+	Currency                   string             `db:"currency" json:"currency"`
+	OccurredAt                 pgtype.Timestamptz `db:"occurred_at" json:"occurred_at"`
+	Reason                     string             `db:"reason" json:"reason"`
+	Status                     string             `db:"status" json:"status"`
+	ResolutionNote             pgtype.Text        `db:"resolution_note" json:"resolution_note"`
+	ResolvedByAdminID          pgtype.Int8        `db:"resolved_by_admin_id" json:"resolved_by_admin_id"`
+	ResolvedAt                 pgtype.Timestamptz `db:"resolved_at" json:"resolved_at"`
+	CreatedAt                  pgtype.Timestamptz `db:"created_at" json:"created_at"`
+	UpdatedAt                  pgtype.Timestamptz `db:"updated_at" json:"updated_at"`
+	PaymentEnvironment         string             `db:"payment_environment" json:"payment_environment"`
+	EventSource                string             `db:"event_source" json:"event_source"`
+	ProviderAccountMappingID   pgtype.Int8        `db:"provider_account_mapping_id" json:"provider_account_mapping_id"`
+	DestinationAccountIdentity pgtype.Text        `db:"destination_account_identity" json:"destination_account_identity"`
 }
 
 type Product struct {
@@ -423,4 +466,5 @@ type WalletTopupIntent struct {
 	Version                         int64              `db:"version" json:"version"`
 	CreatedAt                       pgtype.Timestamptz `db:"created_at" json:"created_at"`
 	UpdatedAt                       pgtype.Timestamptz `db:"updated_at" json:"updated_at"`
+	PaymentEnvironment              string             `db:"payment_environment" json:"payment_environment"`
 }

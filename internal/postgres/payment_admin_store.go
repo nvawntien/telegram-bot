@@ -26,7 +26,8 @@ func (s *AppStore) ManualAcceptPayment(ctx context.Context, manual app.ManualPay
 			Provider: "manual", ProviderTransactionID: manual.ProviderTransactionID,
 			Reference: manual.Reference, Amount: manual.Amount, Currency: manual.Currency,
 			OccurredAt: manual.OccurredAt, Actor: app.PaymentActor{Type: "admin", ID: admin.ID},
-			RequestID: manual.Meta.RequestID,
+			RequestID:   manual.Meta.RequestID,
+			Environment: "production", Source: "manual",
 		}
 		if err := acceptPaymentWithinTransaction(ctx, queries, command, acceptedAt, reservationTTL, configuredDeliveryMaxAttempts(deliveryMaxAttempts), &result); err != nil {
 			return err

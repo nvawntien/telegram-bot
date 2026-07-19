@@ -88,7 +88,7 @@ func newTestVerifier(t *testing.T, now time.Time, tolerance time.Duration) *Sign
 }
 
 func validBody(timestamp time.Time) []byte {
-	return []byte(fmt.Sprintf(`{"event_id":"event-1","transaction_id":"transaction-1","event_type":"payment.received","reference":"TS-ABC123","amount_vnd":125000,"currency":"VND","timestamp":%d,"occurred_at":"%s","received_account":"123456789","metadata":{"channel":"private-test"}}`, timestamp.Unix(), timestamp.Format(time.RFC3339)))
+	return []byte(fmt.Sprintf(`{"event_id":"event-1","transaction_id":"transaction-1","event_type":"payment.received","reference":"TS-ABC123","direction":"inbound","transfer_content":"TS-ABC123","destination_account_identity":"reference-account-1","amount_vnd":125000,"currency":"VND","timestamp":%d,"occurred_at":"%s","received_account":"123456789","metadata":{"channel":"private-test"}}`, timestamp.Unix(), timestamp.Format(time.RFC3339)))
 }
 
 func signedHeaders(body []byte, timestamp time.Time) http.Header {
