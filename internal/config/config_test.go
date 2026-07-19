@@ -150,6 +150,20 @@ func TestLoadAPIValidatesPhase5Configuration(t *testing.T) {
 	}
 }
 
+func TestSignedJSONProviderRequiresSecretOnlyWhenEnabled(t *testing.T) {
+	setValidEnvironment(t)
+	t.Setenv("PAYMENT_ALLOWED_PROVIDERS", "signed_json")
+	t.Setenv("SIGNED_JSON_WEBHOOK_SECRET", "")
+	if _, err := LoadAPI(); err == nil || !strings.Contains(err.Error(), "SIGNED_JSON_WEBHOOK_SECRET") {
+		t.Fatalf("LoadAPI() error = %v", err)
+	}
+
+	t.Setenv("PAYMENT_ALLOWED_PROVIDERS", "")
+	if _, err := LoadAPI(); err != nil {
+		t.Fatalf("disabled provider should not require a secret: %v", err)
+	}
+}
+
 func setValidEnvironment(t *testing.T) {
 	t.Helper()
 	t.Setenv("APP_ENV", "local")

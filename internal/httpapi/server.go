@@ -44,6 +44,7 @@ func NewServer(
 	metrics *observability.HTTPMetrics,
 	gatherer prometheus.Gatherer,
 	telegramWebhook *TelegramWebhook,
+	paymentWebhook *PaymentWebhook,
 	logger *slog.Logger,
 ) *Server {
 	mode := gin.ReleaseMode
@@ -65,6 +66,9 @@ func NewServer(
 	}
 	if telegramWebhook != nil {
 		router.POST("/webhooks/telegram", telegramWebhook.Handler())
+	}
+	if paymentWebhook != nil {
+		router.POST("/webhooks/payments/:provider", paymentWebhook.Handler())
 	}
 	router.NoRoute(func(c *gin.Context) {
 		c.JSON(http.StatusNotFound, gin.H{"error": "not found"})

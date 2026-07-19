@@ -15,6 +15,7 @@ import (
 	"github.com/nvawntien/telegram-bot/internal/httpapi"
 	"github.com/nvawntien/telegram-bot/internal/inventorycrypto"
 	"github.com/nvawntien/telegram-bot/internal/observability"
+	"github.com/nvawntien/telegram-bot/internal/payment"
 	"github.com/nvawntien/telegram-bot/internal/postgres"
 	telegramadapter "github.com/nvawntien/telegram-bot/internal/telegram"
 	"github.com/nvawntien/telegram-bot/internal/vietqr"
@@ -53,6 +54,7 @@ func run(ctx context.Context) error {
 
 	metrics := observability.NewHTTPMetrics(prometheus.DefaultRegisterer)
 	telegramMetrics := observability.NewTelegramMetrics(prometheus.DefaultRegisterer)
+	paymentMetrics := observability.NewPaymentMetrics(prometheus.DefaultRegisterer)
 	store := postgres.NewAppStore(pool)
 	userService := app.NewUserService(store)
 	catalogService := app.NewCatalogService(store, app.DefaultPageSize)
@@ -107,6 +109,21 @@ func run(ctx context.Context) error {
 		cfg.TelegramWebhookSecret, cfg.TelegramWebhookBodyLimit,
 		cfg.TelegramWebhookTimeout, telegramRouter, telegramMetrics,
 	)
+	providerAdapters := make(map[string]payment.WebhookVerifier, len(cfg.PaymentAllowedProviders))
+	for _, providerName := range cfg.PaymentAllowedProviders {
+		if providerName == payment.SignedJSONProvider {
+			adapter, err := payment.NewSignedJSON(cfg.SignedJSONWebhookSecret, cfg.SignedJSONTimestampTolerance)
+			if err != nil {
+				return fmt.Errorf("initialize signed payment webhook: %w", err)
+			}
+			providerAdapters[providerName] = adapter
+		}
+	}
+	paymentWebhook := httpapi.NewPaymentWebhook(
+		payment.NewRegistry(providerAdapters),
+		app.NewPaymentEventIngestionService(store, cfg.PaymentEventMaxAttempts),
+		cfg.PaymentWebhookBodyLimit, cfg.PaymentEventRunTimeout, paymentMetrics,
+	)
 	server := httpapi.NewServer(
 		httpapi.ServerConfig{
 			Address:           cfg.HTTPAddr,
@@ -117,6 +134,7 @@ func run(ctx context.Context) error {
 		metrics,
 		prometheus.DefaultGatherer,
 		telegramWebhook,
+		paymentWebhook,
 		logger,
 	)
 

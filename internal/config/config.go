@@ -14,30 +14,37 @@ import (
 )
 
 const (
-	defaultHTTPAddr                      = ":8080"
-	defaultShutdownWindow                = 10 * time.Second
-	defaultOrderExpiry                   = 15 * time.Minute
-	defaultRetryBase                     = 5 * time.Second
-	defaultWebhookBodyLimit        int64 = 1 << 20
-	defaultWebhookTimeout                = 5 * time.Second
-	defaultUpdateStaleAfter              = 2 * time.Minute
-	defaultAdminSessionTTL               = 15 * time.Minute
-	defaultTelegramAPITimeout            = 5 * time.Second
-	defaultInventoryKeyVersion     int32 = 1
-	defaultInventoryImportMaxItems       = 100
-	defaultInventoryMaxItemBytes         = 4096
-	defaultInventoryMaxTotalBytes        = 256 * 1024
-	defaultBankKeyVersion          int32 = 1
-	defaultOrderMaxQuantity        int32 = 10
-	defaultOrderExpiryInterval           = 30 * time.Second
-	defaultOrderExpiryBatchSize    int32 = 100
-	defaultOrderExpiryRunTimeout         = 10 * time.Second
-	defaultPaymentReferencePrefix        = "TS"
-	defaultPaymentReferenceBytes         = 6
-	defaultVietQRBaseURL                 = "https://img.vietqr.io/image/"
-	defaultVietQRTemplate                = "compact2"
-	defaultOrderPageSize                 = 8
-	defaultBankAccountPageSize           = 8
+	defaultHTTPAddr                       = ":8080"
+	defaultShutdownWindow                 = 10 * time.Second
+	defaultOrderExpiry                    = 15 * time.Minute
+	defaultRetryBase                      = 5 * time.Second
+	defaultWebhookBodyLimit         int64 = 1 << 20
+	defaultWebhookTimeout                 = 5 * time.Second
+	defaultUpdateStaleAfter               = 2 * time.Minute
+	defaultAdminSessionTTL                = 15 * time.Minute
+	defaultTelegramAPITimeout             = 5 * time.Second
+	defaultInventoryKeyVersion      int32 = 1
+	defaultInventoryImportMaxItems        = 100
+	defaultInventoryMaxItemBytes          = 4096
+	defaultInventoryMaxTotalBytes         = 256 * 1024
+	defaultBankKeyVersion           int32 = 1
+	defaultOrderMaxQuantity         int32 = 10
+	defaultOrderExpiryInterval            = 30 * time.Second
+	defaultOrderExpiryBatchSize     int32 = 100
+	defaultOrderExpiryRunTimeout          = 10 * time.Second
+	defaultPaymentReferencePrefix         = "TS"
+	defaultPaymentReferenceBytes          = 6
+	defaultVietQRBaseURL                  = "https://img.vietqr.io/image/"
+	defaultVietQRTemplate                 = "compact2"
+	defaultOrderPageSize                  = 8
+	defaultBankAccountPageSize            = 8
+	defaultPaymentEventBatchSize    int32 = 100
+	defaultPaymentEventPollInterval       = 5 * time.Second
+	defaultPaymentEventRunTimeout         = 10 * time.Second
+	defaultPaymentEventMaxAttempts  int32 = 5
+	defaultPaymentEventRetryBase          = 5 * time.Second
+	defaultPaymentStaleTimeout            = 2 * time.Minute
+	defaultSignedJSONTolerance            = 5 * time.Minute
 )
 
 // Config is immutable after startup and is passed explicitly to process dependencies.
@@ -73,6 +80,16 @@ type Config struct {
 	VietQRTemplate                string
 	OrderPageSize                 int
 	BankAccountPageSize           int
+	PaymentWebhookBodyLimit       int64
+	PaymentEventBatchSize         int32
+	PaymentEventPollInterval      time.Duration
+	PaymentEventRunTimeout        time.Duration
+	PaymentEventMaxAttempts       int32
+	PaymentEventRetryBase         time.Duration
+	PaymentStaleProcessingTimeout time.Duration
+	PaymentAllowedProviders       []string
+	SignedJSONWebhookSecret       string
+	SignedJSONTimestampTolerance  time.Duration
 	DeliveryMaxAttempts           int
 	DeliveryRetryBase             time.Duration
 	LogLevel                      slog.Level
@@ -138,6 +155,14 @@ func load(process processKind) (Config, error) {
 		VietQRTemplate:                defaultVietQRTemplate,
 		OrderPageSize:                 defaultOrderPageSize,
 		BankAccountPageSize:           defaultBankAccountPageSize,
+		PaymentWebhookBodyLimit:       defaultWebhookBodyLimit,
+		PaymentEventBatchSize:         defaultPaymentEventBatchSize,
+		PaymentEventPollInterval:      defaultPaymentEventPollInterval,
+		PaymentEventRunTimeout:        defaultPaymentEventRunTimeout,
+		PaymentEventMaxAttempts:       defaultPaymentEventMaxAttempts,
+		PaymentEventRetryBase:         defaultPaymentEventRetryBase,
+		PaymentStaleProcessingTimeout: defaultPaymentStaleTimeout,
+		SignedJSONTimestampTolerance:  defaultSignedJSONTolerance,
 		DeliveryMaxAttempts:           5,
 		DeliveryRetryBase:             defaultRetryBase,
 		LogLevel:                      slog.LevelInfo,
@@ -159,7 +184,17 @@ func load(process processKind) (Config, error) {
 	assign(&problems, "DATABASE_MIN_CONNECTIONS", parseNonNegativeInt32(os.Getenv("DATABASE_MIN_CONNECTIONS"), cfg.DatabaseMinConnections), &cfg.DatabaseMinConnections)
 	assign(&problems, "DATABASE_CONNECTION_TTL_MINUTES", parsePositiveDuration(os.Getenv("DATABASE_CONNECTION_TTL_MINUTES"), time.Minute, cfg.DatabaseConnectionTTL), &cfg.DatabaseConnectionTTL)
 	assign(&problems, "DATABASE_HEALTH_TIMEOUT_SECONDS", parsePositiveDuration(os.Getenv("DATABASE_HEALTH_TIMEOUT_SECONDS"), time.Second, cfg.DatabaseHealthTimeout), &cfg.DatabaseHealthTimeout)
+	assign(&problems, "PAYMENT_EVENT_BATCH_SIZE", parsePositiveInt32(os.Getenv("PAYMENT_EVENT_BATCH_SIZE"), cfg.PaymentEventBatchSize), &cfg.PaymentEventBatchSize)
+	assign(&problems, "PAYMENT_EVENT_POLL_INTERVAL", parsePositiveDuration(os.Getenv("PAYMENT_EVENT_POLL_INTERVAL"), time.Second, cfg.PaymentEventPollInterval), &cfg.PaymentEventPollInterval)
+	assign(&problems, "PAYMENT_EVENT_RUN_TIMEOUT", parsePositiveDuration(os.Getenv("PAYMENT_EVENT_RUN_TIMEOUT"), time.Second, cfg.PaymentEventRunTimeout), &cfg.PaymentEventRunTimeout)
+	assign(&problems, "PAYMENT_EVENT_MAX_ATTEMPTS", parsePositiveInt32(os.Getenv("PAYMENT_EVENT_MAX_ATTEMPTS"), cfg.PaymentEventMaxAttempts), &cfg.PaymentEventMaxAttempts)
+	assign(&problems, "PAYMENT_EVENT_RETRY_BASE", parsePositiveDuration(os.Getenv("PAYMENT_EVENT_RETRY_BASE"), time.Second, cfg.PaymentEventRetryBase), &cfg.PaymentEventRetryBase)
+	assign(&problems, "PAYMENT_STALE_PROCESSING_TIMEOUT", parsePositiveDuration(os.Getenv("PAYMENT_STALE_PROCESSING_TIMEOUT"), time.Second, cfg.PaymentStaleProcessingTimeout), &cfg.PaymentStaleProcessingTimeout)
 	if process == processAPI {
+		assign(&problems, "PAYMENT_WEBHOOK_BODY_LIMIT", parsePositiveInt64(os.Getenv("PAYMENT_WEBHOOK_BODY_LIMIT"), cfg.PaymentWebhookBodyLimit), &cfg.PaymentWebhookBodyLimit)
+		assign(&problems, "PAYMENT_ALLOWED_PROVIDERS", parsePaymentProviders(os.Getenv("PAYMENT_ALLOWED_PROVIDERS")), &cfg.PaymentAllowedProviders)
+		cfg.SignedJSONWebhookSecret = strings.TrimSpace(os.Getenv("SIGNED_JSON_WEBHOOK_SECRET"))
+		assign(&problems, "SIGNED_JSON_TIMESTAMP_TOLERANCE", parsePositiveDuration(os.Getenv("SIGNED_JSON_TIMESTAMP_TOLERANCE"), time.Second, cfg.SignedJSONTimestampTolerance), &cfg.SignedJSONTimestampTolerance)
 		assign(&problems, "ORDER_EXPIRE_MINUTES", parsePositiveDuration(os.Getenv("ORDER_EXPIRE_MINUTES"), time.Minute, cfg.OrderExpiry), &cfg.OrderExpiry)
 		assign(&problems, "ORDER_MAX_QUANTITY", parsePositiveInt32(os.Getenv("ORDER_MAX_QUANTITY"), cfg.OrderMaxQuantity), &cfg.OrderMaxQuantity)
 		assign(&problems, "PAYMENT_REFERENCE_RANDOM_BYTES", parsePositiveInt(os.Getenv("PAYMENT_REFERENCE_RANDOM_BYTES"), cfg.PaymentReferenceRandomBytes), &cfg.PaymentReferenceRandomBytes)
@@ -254,10 +289,21 @@ func validate(cfg Config, process processKind) []error {
 	if process == processAPI && (cfg.TelegramWebhookBodyLimit < 1024 || cfg.TelegramWebhookBodyLimit > 10<<20) {
 		problems = append(problems, errors.New("TELEGRAM_WEBHOOK_BODY_LIMIT_BYTES must be between 1024 and 10485760"))
 	}
+	if process == processAPI && (cfg.PaymentWebhookBodyLimit < 1024 || cfg.PaymentWebhookBodyLimit > 10<<20) {
+		problems = append(problems, errors.New("PAYMENT_WEBHOOK_BODY_LIMIT must be between 1024 and 10485760"))
+	}
 	if process == processAPI && (strings.TrimSpace(cfg.SupportContact) == "" || len([]rune(cfg.SupportContact)) > 200) {
 		problems = append(problems, errors.New("SUPPORT_CONTACT must contain 1 to 200 characters"))
 	}
 	if process == processAPI {
+		for _, provider := range cfg.PaymentAllowedProviders {
+			if provider != "signed_json" {
+				problems = append(problems, fmt.Errorf("PAYMENT_ALLOWED_PROVIDERS contains unsupported provider %q", provider))
+			}
+			if provider == "signed_json" && len(cfg.SignedJSONWebhookSecret) < 16 {
+				problems = append(problems, errors.New("SIGNED_JSON_WEBHOOK_SECRET must contain at least 16 characters when signed_json is enabled"))
+			}
+		}
 		if len(cfg.AdminTelegramIDs) == 0 {
 			problems = append(problems, errors.New("ADMIN_TELEGRAM_IDS must contain at least one positive ID"))
 		}
@@ -291,6 +337,9 @@ func validate(cfg Config, process processKind) []error {
 		}
 	} else if cfg.OrderExpiryBatchSize <= 0 || cfg.OrderExpiryBatchSize > 1000 {
 		problems = append(problems, errors.New("ORDER_EXPIRY_BATCH_SIZE must be between 1 and 1000"))
+	}
+	if cfg.PaymentEventBatchSize <= 0 || cfg.PaymentEventBatchSize > 1000 || cfg.PaymentEventMaxAttempts <= 0 || cfg.PaymentEventMaxAttempts > 100 {
+		problems = append(problems, errors.New("payment event batch size or max attempts is outside its safe range"))
 	}
 	if cfg.DatabaseMinConnections > cfg.DatabaseMaxConnections {
 		problems = append(problems, errors.New("DATABASE_MIN_CONNECTIONS cannot exceed DATABASE_MAX_CONNECTIONS"))
@@ -342,6 +391,26 @@ func parseAdminIDs(raw string) parseResult[[]int64] {
 		ids = append(ids, id)
 	}
 	return parseResult[[]int64]{value: ids}
+}
+
+func parsePaymentProviders(raw string) parseResult[[]string] {
+	if strings.TrimSpace(raw) == "" {
+		return parseResult[[]string]{value: nil}
+	}
+	seen := make(map[string]struct{})
+	providers := make([]string, 0)
+	for _, item := range strings.Split(raw, ",") {
+		name := strings.ToLower(strings.TrimSpace(item))
+		if name == "" {
+			return parseResult[[]string]{err: errors.New("contains a blank provider")}
+		}
+		if _, exists := seen[name]; exists {
+			continue
+		}
+		seen[name] = struct{}{}
+		providers = append(providers, name)
+	}
+	return parseResult[[]string]{value: providers}
 }
 
 func parseEncryptionKey(raw string) parseResult[[]byte] {

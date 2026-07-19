@@ -152,7 +152,7 @@ func newWebhookTestHandler(t *testing.T, processor TelegramUpdateProcessor, body
 	server := NewServer(
 		ServerConfig{Address: ":0", Environment: "test", PrometheusEnabled: true},
 		readinessCheckFunc(func(context.Context) error { return nil }),
-		httpMetrics, registry, webhook, logger,
+		httpMetrics, registry, webhook, nil, logger,
 	)
 	return server.httpServer.Handler, registry
 }
