@@ -61,3 +61,9 @@ func TestGeneratorRejectsInvalidBankAndAmount(t *testing.T) {
 		}
 	}
 }
+
+func TestGeneratorRejectsUnsafeTemplate(t *testing.T) {
+	if _, err := New("https://img.example.test/image/", "../escape"); !errors.Is(err, app.ErrInvalidPaymentInstruction) {
+		t.Fatalf("New() error = %v", err)
+	}
+}

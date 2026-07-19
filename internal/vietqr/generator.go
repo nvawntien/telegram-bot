@@ -18,7 +18,7 @@ type Generator struct {
 
 func New(baseURL, template string) (*Generator, error) {
 	parsed, err := url.Parse(strings.TrimSpace(baseURL))
-	if err != nil || parsed.Scheme != "https" || parsed.Host == "" || strings.TrimSpace(template) == "" {
+	if err != nil || parsed.Scheme != "https" || parsed.Host == "" || !safeTemplate(template) {
 		return nil, app.ErrInvalidPaymentInstruction
 	}
 	return &Generator{baseURL: parsed, template: strings.TrimSpace(template)}, nil
@@ -66,6 +66,19 @@ func validReference(value string) bool {
 	}
 	for _, char := range value {
 		if (char < 'A' || char > 'Z') && (char < '0' || char > '9') {
+			return false
+		}
+	}
+	return true
+}
+
+func safeTemplate(value string) bool {
+	value = strings.TrimSpace(value)
+	if len(value) < 1 || len(value) > 32 {
+		return false
+	}
+	for _, char := range value {
+		if (char < 'a' || char > 'z') && (char < 'A' || char > 'Z') && (char < '0' || char > '9') && char != '-' && char != '_' {
 			return false
 		}
 	}

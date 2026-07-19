@@ -237,6 +237,9 @@ func (s *OrderService) Get(ctx context.Context, telegramUserID, orderID int64) (
 		}
 		return OrderDetail{}, PaymentInstruction{}, fmt.Errorf("get order: %w", err)
 	}
+	if order.BankAccountID == 0 {
+		return order, PaymentInstruction{}, nil
+	}
 	instruction, err := s.instruction(ctx, order)
 	if err != nil {
 		return OrderDetail{}, PaymentInstruction{}, err

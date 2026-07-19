@@ -124,7 +124,7 @@ func OrderDetailView(order app.OrderDetail, instruction app.PaymentInstruction) 
 		order.ExpiresAt.Local().Format("02/01/2006 15:04:05"),
 	)
 	rows := Keyboard{}
-	if order.Status == domain.OrderStatusPendingPayment {
+	if order.Status == domain.OrderStatusPendingPayment && instruction.ImageURL != "" {
 		rows = append(rows, []Button{{Text: "Mở VietQR", URL: instruction.ImageURL}})
 		rows = append(rows, []Button{{Text: "Hủy đơn", Data: fmt.Sprintf("v1:o:x:%d:%d", order.ID, order.Version)}})
 	}

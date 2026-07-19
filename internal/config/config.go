@@ -286,7 +286,7 @@ func validate(cfg Config, process processKind) []error {
 			problems = append(problems, errors.New("order and bank page sizes must not exceed 20"))
 		}
 		vietQRURL, err := url.Parse(cfg.VietQRBaseURL)
-		if err != nil || vietQRURL.Scheme != "https" || vietQRURL.Host == "" || strings.TrimSpace(cfg.VietQRTemplate) == "" {
+		if err != nil || vietQRURL.Scheme != "https" || vietQRURL.Host == "" || !validVietQRTemplate(cfg.VietQRTemplate) {
 			problems = append(problems, errors.New("VietQR configuration is invalid"))
 		}
 	} else if cfg.OrderExpiryBatchSize <= 0 || cfg.OrderExpiryBatchSize > 1000 {
@@ -305,6 +305,19 @@ func validReferencePrefix(value string) bool {
 	}
 	for _, char := range value {
 		if (char < 'A' || char > 'Z') && (char < '0' || char > '9') {
+			return false
+		}
+	}
+	return true
+}
+
+func validVietQRTemplate(value string) bool {
+	value = strings.TrimSpace(value)
+	if len(value) < 1 || len(value) > 32 {
+		return false
+	}
+	for _, char := range value {
+		if (char < 'a' || char > 'z') && (char < 'A' || char > 'Z') && (char < '0' || char > '9') && char != '-' && char != '_' {
 			return false
 		}
 	}

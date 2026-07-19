@@ -139,6 +139,17 @@ func TestLoadAPIValidatesTelegramRuntimeLimits(t *testing.T) {
 	}
 }
 
+func TestLoadAPIValidatesPhase5Configuration(t *testing.T) {
+	setValidEnvironment(t)
+	t.Setenv("PAYMENT_REFERENCE_PREFIX", "bad-prefix")
+	t.Setenv("PAYMENT_REFERENCE_RANDOM_BYTES", "2")
+	t.Setenv("VIETQR_TEMPLATE", "../escape")
+	_, err := LoadAPI()
+	if err == nil || !strings.Contains(err.Error(), "payment reference") || !strings.Contains(err.Error(), "VietQR") {
+		t.Fatalf("LoadAPI() error = %v", err)
+	}
+}
+
 func setValidEnvironment(t *testing.T) {
 	t.Helper()
 	t.Setenv("APP_ENV", "local")
