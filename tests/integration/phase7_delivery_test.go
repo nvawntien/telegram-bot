@@ -164,6 +164,43 @@ func TestPhase7ConfirmedSendFinalizeFailureBecomesAmbiguous(t *testing.T) {
 	}
 }
 
+func TestPhase7ConcurrentFinalizeHasOneBusinessEffect(t *testing.T) {
+	database := newTestDatabase(t, true)
+	cipher := newPhase7Cipher(t)
+	fixture := createPhase7Delivery(t, database, cipher, true)
+	store := postgres.NewAppStore(database.pool)
+	items, err := store.ClaimDeliveryJobs(context.Background(), time.Now(), "concurrent-finalize-worker", 1)
+	if err != nil || len(items) != 1 {
+		t.Fatalf("claim = %+v, %v", items, err)
+	}
+	if _, err := store.BeginDeliveryAttempt(context.Background(), fixture.jobID, "concurrent-finalize-worker", time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	success := app.DeliverySuccess{Result: app.DeliverySendResult{
+		ChatID: items[0].RecipientChatID, MessageID: 88991, SentAt: time.Now(), Method: "sendMessage",
+	}, CompletedAt: time.Now()}
+	errorsFound := make(chan error, 2)
+	var wait sync.WaitGroup
+	for range 2 {
+		wait.Add(1)
+		go func() {
+			defer wait.Done()
+			errorsFound <- store.FinalizeDeliverySuccess(context.Background(), fixture.jobID, "concurrent-finalize-worker", success)
+		}()
+	}
+	wait.Wait()
+	close(errorsFound)
+	for err := range errorsFound {
+		if err != nil {
+			t.Fatalf("FinalizeDeliverySuccess() error = %v", err)
+		}
+	}
+	assertPhase7State(t, database, fixture, "completed", "delivered", "sold")
+	assertCount(t, database, `SELECT count(*) FROM delivery_attempts WHERE delivery_job_id=$1 AND status='succeeded'`, 1, fixture.jobID)
+	assertCount(t, database, `SELECT count(*) FROM order_status_history WHERE order_id=$1 AND to_status='delivered'`, 1, fixture.orderID)
+	assertCount(t, database, `SELECT count(*) FROM audit_logs WHERE resource_id=$1 AND action='delivery.completed'`, 1, fixture.jobID)
+}
+
 func TestPhase7ConcurrentClaimAndStaleRecovery(t *testing.T) {
 	database := newTestDatabase(t, true)
 	cipher := newPhase7Cipher(t)
@@ -250,6 +287,16 @@ func TestPhase7ManualRecoveryRequiresSessionReasonAndEvidence(t *testing.T) {
 	if _, err := deliveries.List(context.Background(), adminTelegramID+1, 0); !errors.Is(err, app.ErrUnauthorized) {
 		t.Fatalf("unauthorized delivery list error = %v", err)
 	}
+	revokedTelegramID := adminTelegramID + 2
+	if err := store.BootstrapAdmin(context.Background(), revokedTelegramID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := database.pool.Exec(context.Background(), `UPDATE admins SET is_active=false WHERE user_id=(SELECT id FROM users WHERE telegram_user_id=$1)`, revokedTelegramID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := deliveries.List(context.Background(), revokedTelegramID, 0); !errors.Is(err, app.ErrForbidden) {
+		t.Fatalf("revoked delivery list error = %v", err)
+	}
 
 	retryFixture := createPhase7Delivery(t, database, cipher, true)
 	makePhase7Ambiguous(t, database, store, cipher, retryFixture)
@@ -268,6 +315,16 @@ func TestPhase7ManualRecoveryRequiresSessionReasonAndEvidence(t *testing.T) {
 		t.Fatalf("Retry() = %+v, %v", result, err)
 	}
 	assertPhase7State(t, database, retryFixture, "pending", "delivering", "reserved")
+	startTestUpdate(t, database, 97006)
+	_, duplicateErr := deliveries.Retry(context.Background(), app.DeliveryResolutionCommand{
+		AdminTelegramID: adminTelegramID, JobID: retryFixture.jobID, ExpectedVersion: result.Version,
+		Reason: "duplicate callback must not enqueue again", Session: retrySession,
+		Meta: app.RequestMeta{UpdateID: 97006, RequestID: "retry-duplicate"},
+	})
+	if !errors.Is(duplicateErr, app.ErrStaleVersion) && !errors.Is(duplicateErr, app.ErrSessionExpired) {
+		t.Fatalf("duplicate retry error = %v", duplicateErr)
+	}
+	assertPhase7State(t, database, retryFixture, "pending", "delivering", "reserved")
 	if _, err := database.pool.Exec(context.Background(), `UPDATE outbox_events SET next_attempt_at=clock_timestamp()+interval '1 hour' WHERE id=$1`, retryFixture.jobID); err != nil {
 		t.Fatal(err)
 	}
@@ -280,10 +337,21 @@ func TestPhase7ManualRecoveryRequiresSessionReasonAndEvidence(t *testing.T) {
 		t.Fatal(err)
 	}
 	startTestUpdate(t, database, 97004)
+	_, err = deliveries.Complete(context.Background(), app.DeliveryResolutionCommand{
+		AdminTelegramID: adminTelegramID, JobID: completeFixture.jobID,
+		ExpectedVersion:   phase7JobVersion(t, database, completeFixture.jobID) - 1,
+		TelegramMessageID: 777001, Reason: "message verified in the customer chat", Session: completeSession,
+		Meta: app.RequestMeta{UpdateID: 97004, RequestID: "complete-stale"},
+	})
+	if !errors.Is(err, app.ErrStaleVersion) {
+		t.Fatalf("stale completion error = %v", err)
+	}
+	assertPhase7State(t, database, completeFixture, "ambiguous", "delivering", "reserved")
+	startTestUpdate(t, database, 97005)
 	result, err = deliveries.Complete(context.Background(), app.DeliveryResolutionCommand{
 		AdminTelegramID: adminTelegramID, JobID: completeFixture.jobID, ExpectedVersion: phase7JobVersion(t, database, completeFixture.jobID),
 		TelegramMessageID: 777001, Reason: "message verified in the customer chat", Session: completeSession,
-		Meta: app.RequestMeta{UpdateID: 97004, RequestID: "complete-confirm"},
+		Meta: app.RequestMeta{UpdateID: 97005, RequestID: "complete-confirm"},
 	})
 	if err != nil || result.Status != "completed" {
 		t.Fatalf("Complete() = %+v, %v", result, err)
@@ -296,6 +364,57 @@ func TestPhase7ManualRecoveryRequiresSessionReasonAndEvidence(t *testing.T) {
 	report, err := deliveries.Reconcile(context.Background(), adminTelegramID)
 	if err != nil || !report.Clean() {
 		t.Fatalf("reconciliation = %+v, %v", report, err)
+	}
+}
+
+func TestPhase7ManualResolutionRollsBackWhenAuditFails(t *testing.T) {
+	database := newTestDatabase(t, true)
+	cipher := newPhase7Cipher(t)
+	store := postgres.NewAppStore(database.pool)
+	adminTelegramID := int64(9701001)
+	if err := store.BootstrapAdmin(context.Background(), adminTelegramID); err != nil {
+		t.Fatal(err)
+	}
+	admins := app.NewAdminService(store, 15*time.Minute)
+	deliveries := app.NewDeliveryAdminService(store, 8)
+	fixture := createPhase7Delivery(t, database, cipher, true)
+	makePhase7Ambiguous(t, database, store, cipher, fixture)
+	startTestUpdate(t, database, 97101)
+	session, err := admins.StartSession(context.Background(), adminTelegramID, app.SessionDeliveryRetry, map[string]any{"step": "confirm"}, app.RequestMeta{UpdateID: 97101, RequestID: "audit-start"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	startTestUpdate(t, database, 97102)
+	if _, err := database.pool.Exec(context.Background(), `
+		CREATE FUNCTION reject_delivery_audit() RETURNS trigger LANGUAGE plpgsql AS $$
+		BEGIN
+			IF NEW.action = 'delivery.manual_retry' THEN RAISE EXCEPTION 'forced delivery audit failure'; END IF;
+			RETURN NEW;
+		END $$;
+		CREATE TRIGGER reject_delivery_audit BEFORE INSERT ON audit_logs
+		FOR EACH ROW EXECUTE FUNCTION reject_delivery_audit();
+	`); err != nil {
+		t.Fatal(err)
+	}
+	_, err = deliveries.Retry(context.Background(), app.DeliveryResolutionCommand{
+		AdminTelegramID: adminTelegramID, JobID: fixture.jobID,
+		ExpectedVersion: phase7JobVersion(t, database, fixture.jobID),
+		Reason:          "verified not delivered", Session: session,
+		Meta: app.RequestMeta{UpdateID: 97102, RequestID: "audit-failure"},
+	})
+	if err == nil {
+		t.Fatal("Retry() error = nil, want forced audit failure")
+	}
+	assertPhase7State(t, database, fixture, "ambiguous", "delivering", "reserved")
+	var sessionState, receiptStatus string
+	if err := database.pool.QueryRow(context.Background(), `SELECT state FROM admin_sessions WHERE id=$1`, session.ID).Scan(&sessionState); err != nil {
+		t.Fatal(err)
+	}
+	if err := database.pool.QueryRow(context.Background(), `SELECT status FROM telegram_update_receipts WHERE update_id=97102`).Scan(&receiptStatus); err != nil {
+		t.Fatal(err)
+	}
+	if sessionState != app.SessionDeliveryRetry || receiptStatus != "processing" {
+		t.Fatalf("rollback state session=%s receipt=%s", sessionState, receiptStatus)
 	}
 }
 

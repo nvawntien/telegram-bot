@@ -136,8 +136,8 @@ func TestClaimPendingOutboxEvents(t *testing.T) {
 	now := time.Now()
 
 	due, err := database.queries.InsertOutboxEvent(ctx, generated.InsertOutboxEventParams{
-		EventType:        "order.delivery_requested",
-		AggregateType:    "order",
+		EventType:        "test.outbox_due",
+		AggregateType:    "test",
 		AggregateID:      1,
 		DeduplicationKey: "outbox-due",
 		Payload:          []byte(`{"order_id":1}`),
@@ -148,8 +148,8 @@ func TestClaimPendingOutboxEvents(t *testing.T) {
 		t.Fatalf("insert due outbox event: %v", err)
 	}
 	if _, err := database.queries.InsertOutboxEvent(ctx, generated.InsertOutboxEventParams{
-		EventType:        "order.delivery_requested",
-		AggregateType:    "order",
+		EventType:        "test.outbox_future",
+		AggregateType:    "test",
 		AggregateID:      2,
 		DeduplicationKey: "outbox-future",
 		Payload:          []byte(`{"order_id":2}`),
