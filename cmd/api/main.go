@@ -10,12 +10,14 @@ import (
 	"time"
 
 	"github.com/nvawntien/telegram-bot/internal/app"
+	"github.com/nvawntien/telegram-bot/internal/bankcrypto"
 	"github.com/nvawntien/telegram-bot/internal/config"
 	"github.com/nvawntien/telegram-bot/internal/httpapi"
 	"github.com/nvawntien/telegram-bot/internal/inventorycrypto"
 	"github.com/nvawntien/telegram-bot/internal/observability"
 	"github.com/nvawntien/telegram-bot/internal/postgres"
 	telegramadapter "github.com/nvawntien/telegram-bot/internal/telegram"
+	"github.com/nvawntien/telegram-bot/internal/vietqr"
 	"github.com/prometheus/client_golang/prometheus"
 )
 
@@ -72,6 +74,23 @@ func run(ctx context.Context) error {
 		},
 		app.DefaultPageSize, telegramMetrics,
 	)
+	bankCipher, err := bankcrypto.New(cfg.BankAccountEncryptionKey, cfg.BankAccountEncryptionVersion)
+	if err != nil {
+		return fmt.Errorf("initialize bank account encryption: %w", err)
+	}
+	bankService := app.NewBankAccountService(store, bankCipher, adminService, cfg.BankAccountPageSize)
+	vietQRGenerator, err := vietqr.New(cfg.VietQRBaseURL, cfg.VietQRTemplate)
+	if err != nil {
+		return fmt.Errorf("initialize VietQR instructions: %w", err)
+	}
+	referenceGenerator, err := app.NewPaymentReferenceGenerator(cfg.PaymentReferencePrefix, cfg.PaymentReferenceRandomBytes)
+	if err != nil {
+		return fmt.Errorf("initialize payment references: %w", err)
+	}
+	orderService := app.NewOrderService(
+		store, bankCipher, vietQRGenerator, referenceGenerator, cfg.OrderExpiry,
+		cfg.OrderMaxQuantity, cfg.OrderPageSize,
+	)
 	updateService := app.NewUpdateService(store, cfg.TelegramUpdateStaleAfter)
 	telegramClient, err := telegramadapter.NewClient(
 		cfg.TelegramBotToken, "", cfg.TelegramAPITimeout, 1<<20, telegramMetrics,
@@ -79,8 +98,9 @@ func run(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	telegramRouter := telegramadapter.NewRouter(
-		userService, catalogService, adminService, inventoryService, updateService, telegramClient,
+	telegramRouter := telegramadapter.NewRouterWithOrdering(
+		userService, catalogService, adminService, inventoryService, bankService, orderService,
+		updateService, telegramClient,
 		cfg.SupportContact, logger, telegramMetrics,
 	)
 	telegramWebhook := httpapi.NewTelegramWebhook(

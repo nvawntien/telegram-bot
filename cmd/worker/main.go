@@ -8,10 +8,12 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/nvawntien/telegram-bot/internal/app"
 	"github.com/nvawntien/telegram-bot/internal/config"
 	"github.com/nvawntien/telegram-bot/internal/observability"
 	"github.com/nvawntien/telegram-bot/internal/postgres"
 	"github.com/nvawntien/telegram-bot/internal/worker"
+	"github.com/prometheus/client_golang/prometheus"
 )
 
 func main() {
@@ -44,6 +46,12 @@ func run(ctx context.Context) error {
 	}
 	defer pool.Close()
 
-	runner := worker.NewRunner(postgres.NewChecker(pool, cfg.DatabaseHealthTimeout), logger, 30*time.Second)
+	store := postgres.NewAppStore(pool)
+	expiryService := app.NewOrderExpiryService(store, cfg.OrderExpiryBatchSize)
+	expiryMetrics := observability.NewOrderExpiryMetrics(prometheus.DefaultRegisterer)
+	runner := worker.NewRunner(
+		postgres.NewChecker(pool, cfg.DatabaseHealthTimeout), expiryService, logger,
+		30*time.Second, cfg.OrderExpiryInterval, cfg.OrderExpiryRunTimeout, expiryMetrics,
+	)
 	return runner.Run(ctx)
 }

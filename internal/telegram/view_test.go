@@ -63,3 +63,19 @@ func TestViewsKeepPaginationContextAndCallbackLimits(t *testing.T) {
 		}
 	}
 }
+
+func TestPaymentInstructionViewEscapesValuesAndStatesBoundary(t *testing.T) {
+	order := app.OrderDetail{ID: 9}
+	instruction := app.PaymentInstruction{
+		BankDisplayName: "<bank>", AccountNumber: "1234567890", AccountName: "A & B",
+		Amount: 125000, TransferContent: "TS1234", ExpiresAt: time.Now().Add(time.Hour),
+		ImageURL: "https://img.example.test/qr.png?amount=125000",
+	}
+	text, keyboard := PaymentInstructionView(order, instruction)
+	if strings.Contains(text, "<bank>") || !strings.Contains(text, "không chứng minh") || !strings.Contains(text, "125.000") {
+		t.Fatalf("PaymentInstructionView() text = %q", text)
+	}
+	if len(keyboard) == 0 || keyboard[0][0].URL != instruction.ImageURL {
+		t.Fatalf("PaymentInstructionView() keyboard = %#v", keyboard)
+	}
+}

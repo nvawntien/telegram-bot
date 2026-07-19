@@ -25,6 +25,12 @@ type TelegramMetrics struct {
 	inventoryReleasedItems prometheus.Counter
 	inventoryEncryption    *prometheus.CounterVec
 	inventoryRecovery      *prometheus.CounterVec
+	ordersCreated          *prometheus.CounterVec
+	ordersCancelled        *prometheus.CounterVec
+	orderCreationDuration  prometheus.Histogram
+	orderHistoryQueries    *prometheus.CounterVec
+	paymentInstructions    *prometheus.CounterVec
+	bankAccountMutations   *prometheus.CounterVec
 }
 
 func NewTelegramMetrics(registerer prometheus.Registerer) *TelegramMetrics {
@@ -101,6 +107,30 @@ func NewTelegramMetrics(registerer prometheus.Registerer) *TelegramMetrics {
 			Namespace: "telegram_shop", Name: "inventory_reservation_recovery_total",
 			Help: "Inventory reservation recovery decisions by bounded result.",
 		}, []string{"result"}),
+		ordersCreated: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Namespace: "telegram_shop", Name: "orders_created_total",
+			Help: "Order creation attempts by bounded result.",
+		}, []string{"result"}),
+		ordersCancelled: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Namespace: "telegram_shop", Name: "orders_cancelled_total",
+			Help: "Customer cancellation attempts by bounded result.",
+		}, []string{"result"}),
+		orderCreationDuration: prometheus.NewHistogram(prometheus.HistogramOpts{
+			Namespace: "telegram_shop", Name: "order_creation_duration_seconds",
+			Help: "Order creation duration.", Buckets: prometheus.DefBuckets,
+		}),
+		orderHistoryQueries: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Namespace: "telegram_shop", Name: "order_history_queries_total",
+			Help: "Ownership-scoped order history queries by bounded result.",
+		}, []string{"result"}),
+		paymentInstructions: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Namespace: "telegram_shop", Name: "payment_instructions_generated_total",
+			Help: "Payment instruction generation attempts by bounded result.",
+		}, []string{"result"}),
+		bankAccountMutations: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Namespace: "telegram_shop", Name: "bank_account_mutations_total",
+			Help: "Bank account mutations by operation and bounded result.",
+		}, []string{"operation", "result"}),
 	}
 	registerer.MustRegister(
 		metrics.webhookRequests, metrics.updates, metrics.updateDuration,
@@ -109,6 +139,8 @@ func NewTelegramMetrics(registerer prometheus.Registerer) *TelegramMetrics {
 		metrics.inventoryImports, metrics.inventoryImportedItems, metrics.inventoryDuplicates,
 		metrics.inventoryClaims, metrics.inventoryClaimedItems, metrics.inventoryReleases,
 		metrics.inventoryReleasedItems, metrics.inventoryEncryption, metrics.inventoryRecovery,
+		metrics.ordersCreated, metrics.ordersCancelled, metrics.orderCreationDuration,
+		metrics.orderHistoryQueries, metrics.paymentInstructions, metrics.bankAccountMutations,
 	)
 	return metrics
 }
@@ -165,4 +197,22 @@ func (m *TelegramMetrics) ObserveInventoryEncryption(operation, result string) {
 
 func (m *TelegramMetrics) ObserveInventoryRecovery(result string) {
 	m.inventoryRecovery.WithLabelValues(result).Inc()
+}
+
+func (m *TelegramMetrics) ObserveOrder(operation, result string, duration time.Duration) {
+	switch operation {
+	case "create":
+		m.ordersCreated.WithLabelValues(result).Inc()
+		m.orderCreationDuration.Observe(duration.Seconds())
+	case "cancel":
+		m.ordersCancelled.WithLabelValues(result).Inc()
+	case "history":
+		m.orderHistoryQueries.WithLabelValues(result).Inc()
+	case "instruction":
+		m.paymentInstructions.WithLabelValues(result).Inc()
+	}
+}
+
+func (m *TelegramMetrics) ObserveBankMutation(operation, result string) {
+	m.bankAccountMutations.WithLabelValues(operation, result).Inc()
 }

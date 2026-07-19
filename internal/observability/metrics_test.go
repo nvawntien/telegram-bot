@@ -45,9 +45,24 @@ func TestTelegramMetricsCanUseIsolatedRegistries(t *testing.T) {
 		metrics.ObserveInventoryRelease("success", 1)
 		metrics.ObserveInventoryEncryption("encrypt", "success")
 		metrics.ObserveInventoryRecovery("required")
+		metrics.ObserveOrder("create", "success", time.Millisecond)
+		metrics.ObserveOrder("cancel", "success", time.Millisecond)
+		metrics.ObserveOrder("history", "success", 0)
+		metrics.ObserveOrder("instruction", "success", 0)
+		metrics.ObserveBankMutation("create", "success")
 		families, err := registry.Gather()
-		if err != nil || len(families) != 18 {
+		if err != nil || len(families) != 24 {
 			t.Fatalf("Telegram registry families = %d, %v", len(families), err)
 		}
+	}
+}
+
+func TestOrderExpiryMetricsCanUseIsolatedRegistry(t *testing.T) {
+	registry := prometheus.NewRegistry()
+	metrics := NewOrderExpiryMetrics(registry)
+	metrics.ObserveExpiryRun("success", 3, time.Millisecond)
+	families, err := registry.Gather()
+	if err != nil || len(families) != 4 {
+		t.Fatalf("expiry registry families = %d, %v", len(families), err)
 	}
 }

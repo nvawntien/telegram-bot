@@ -30,6 +30,13 @@ func TestParseCallback(t *testing.T) {
 		{data: "v1:c:0", action: CallbackCategories},
 		{data: "v1:p:12:3", action: CallbackProducts},
 		{data: "v1:d:42:12:3", action: CallbackProductDetail},
+		{data: "v1:o:q:42:2", action: CallbackOrderQuantity},
+		{data: "v1:o:b:42:2:7", action: CallbackOrderBank},
+		{data: "v1:o:c:91:42:2:7", action: CallbackOrderConfirm},
+		{data: "v1:o:l:0", action: CallbackOrders},
+		{data: "v1:o:v:11", action: CallbackOrderView},
+		{data: "v1:o:x:11:2", action: CallbackOrderAskCancel},
+		{data: "v1:o:k:11:2", action: CallbackOrderCancel},
 		{data: "v1:a:ce:3:2", action: CallbackAdminCategoryEdit},
 		{data: "v1:a:ca:3:2:0", action: CallbackAdminCategoryAskToggle},
 		{data: "v1:a:pt:1:2:3:4:1", action: CallbackAdminProductToggle},
@@ -38,6 +45,11 @@ func TestParseCallback(t *testing.T) {
 		{data: "v1:a:ii:12", action: CallbackAdminInventoryImport},
 		{data: "v1:a:is:42:3:0", action: CallbackAdminInventoryAskToggle},
 		{data: "v1:a:it:1:2:42:3:1", action: CallbackAdminInventoryToggle},
+		{data: "v1:a:b:0", action: CallbackAdminBanks},
+		{data: "v1:a:bn", action: CallbackAdminBankNew},
+		{data: "v1:a:be:7:2", action: CallbackAdminBankEdit},
+		{data: "v1:a:ba:7:2:0", action: CallbackAdminBankAskToggle},
+		{data: "v1:a:bt:1:2:7:3:1", action: CallbackAdminBankToggle},
 	}
 	for _, test := range tests {
 		callback, err := ParseCallback(test.data)
@@ -53,6 +65,8 @@ func TestParseCallbackRejectsMalformedData(t *testing.T) {
 		"v1:m:extra", "v1:d:1:2", "v1:a:ct:1:2:3:4:2", "v1:a:ce:1",
 		strings.Repeat("x", MaxCallbackDataBytes+1), string([]byte{0xff}),
 		"v1:a:il:0:1", "v1:a:is:1:0:1", "v1:a:it:1:2:3:4:2",
+		"v1:o:q:1:-1", "v1:o:c:1:2:0:3", "v1:o:v:0", "v1:o:k:1:0",
+		"v1:a:be:1:0", "v1:a:bt:1:2:3:4:2",
 	}
 	for _, value := range values {
 		if _, err := ParseCallback(value); !errors.Is(err, ErrInvalidCallback) {

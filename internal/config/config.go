@@ -27,6 +27,17 @@ const (
 	defaultInventoryImportMaxItems       = 100
 	defaultInventoryMaxItemBytes         = 4096
 	defaultInventoryMaxTotalBytes        = 256 * 1024
+	defaultBankKeyVersion          int32 = 1
+	defaultOrderMaxQuantity        int32 = 10
+	defaultOrderExpiryInterval           = 30 * time.Second
+	defaultOrderExpiryBatchSize    int32 = 100
+	defaultOrderExpiryRunTimeout         = 10 * time.Second
+	defaultPaymentReferencePrefix        = "TS"
+	defaultPaymentReferenceBytes         = 6
+	defaultVietQRBaseURL                 = "https://img.vietqr.io/image/"
+	defaultVietQRTemplate                = "compact2"
+	defaultOrderPageSize                 = 8
+	defaultBankAccountPageSize           = 8
 )
 
 // Config is immutable after startup and is passed explicitly to process dependencies.
@@ -49,7 +60,19 @@ type Config struct {
 	InventoryImportMaxItems       int
 	InventoryImportMaxItemBytes   int
 	InventoryImportMaxTotalBytes  int
+	BankAccountEncryptionKey      []byte
+	BankAccountEncryptionVersion  int32
 	OrderExpiry                   time.Duration
+	OrderMaxQuantity              int32
+	OrderExpiryInterval           time.Duration
+	OrderExpiryBatchSize          int32
+	OrderExpiryRunTimeout         time.Duration
+	PaymentReferencePrefix        string
+	PaymentReferenceRandomBytes   int
+	VietQRBaseURL                 string
+	VietQRTemplate                string
+	OrderPageSize                 int
+	BankAccountPageSize           int
 	DeliveryMaxAttempts           int
 	DeliveryRetryBase             time.Duration
 	LogLevel                      slog.Level
@@ -102,8 +125,19 @@ func load(process processKind) (Config, error) {
 		InventoryImportMaxItems:       defaultInventoryImportMaxItems,
 		InventoryImportMaxItemBytes:   defaultInventoryMaxItemBytes,
 		InventoryImportMaxTotalBytes:  defaultInventoryMaxTotalBytes,
+		BankAccountEncryptionVersion:  defaultBankKeyVersion,
 		SupportContact:                envOrDefault("SUPPORT_CONTACT", "Vui lòng liên hệ quản trị viên cửa hàng."),
 		OrderExpiry:                   defaultOrderExpiry,
+		OrderMaxQuantity:              defaultOrderMaxQuantity,
+		OrderExpiryInterval:           defaultOrderExpiryInterval,
+		OrderExpiryBatchSize:          defaultOrderExpiryBatchSize,
+		OrderExpiryRunTimeout:         defaultOrderExpiryRunTimeout,
+		PaymentReferencePrefix:        defaultPaymentReferencePrefix,
+		PaymentReferenceRandomBytes:   defaultPaymentReferenceBytes,
+		VietQRBaseURL:                 defaultVietQRBaseURL,
+		VietQRTemplate:                defaultVietQRTemplate,
+		OrderPageSize:                 defaultOrderPageSize,
+		BankAccountPageSize:           defaultBankAccountPageSize,
 		DeliveryMaxAttempts:           5,
 		DeliveryRetryBase:             defaultRetryBase,
 		LogLevel:                      slog.LevelInfo,
@@ -116,7 +150,6 @@ func load(process processKind) (Config, error) {
 	}
 
 	var problems []error
-	assign(&problems, "ORDER_EXPIRE_MINUTES", parsePositiveDuration(os.Getenv("ORDER_EXPIRE_MINUTES"), time.Minute, cfg.OrderExpiry), &cfg.OrderExpiry)
 	assign(&problems, "DELIVERY_MAX_ATTEMPTS", parsePositiveInt(os.Getenv("DELIVERY_MAX_ATTEMPTS"), cfg.DeliveryMaxAttempts), &cfg.DeliveryMaxAttempts)
 	assign(&problems, "DELIVERY_RETRY_BASE_SECONDS", parsePositiveDuration(os.Getenv("DELIVERY_RETRY_BASE_SECONDS"), time.Second, cfg.DeliveryRetryBase), &cfg.DeliveryRetryBase)
 	assign(&problems, "LOG_LEVEL", parseLogLevel(os.Getenv("LOG_LEVEL")), &cfg.LogLevel)
@@ -127,17 +160,31 @@ func load(process processKind) (Config, error) {
 	assign(&problems, "DATABASE_CONNECTION_TTL_MINUTES", parsePositiveDuration(os.Getenv("DATABASE_CONNECTION_TTL_MINUTES"), time.Minute, cfg.DatabaseConnectionTTL), &cfg.DatabaseConnectionTTL)
 	assign(&problems, "DATABASE_HEALTH_TIMEOUT_SECONDS", parsePositiveDuration(os.Getenv("DATABASE_HEALTH_TIMEOUT_SECONDS"), time.Second, cfg.DatabaseHealthTimeout), &cfg.DatabaseHealthTimeout)
 	if process == processAPI {
+		assign(&problems, "ORDER_EXPIRE_MINUTES", parsePositiveDuration(os.Getenv("ORDER_EXPIRE_MINUTES"), time.Minute, cfg.OrderExpiry), &cfg.OrderExpiry)
+		assign(&problems, "ORDER_MAX_QUANTITY", parsePositiveInt32(os.Getenv("ORDER_MAX_QUANTITY"), cfg.OrderMaxQuantity), &cfg.OrderMaxQuantity)
+		assign(&problems, "PAYMENT_REFERENCE_RANDOM_BYTES", parsePositiveInt(os.Getenv("PAYMENT_REFERENCE_RANDOM_BYTES"), cfg.PaymentReferenceRandomBytes), &cfg.PaymentReferenceRandomBytes)
+		assign(&problems, "ORDER_PAGE_SIZE", parsePositiveInt(os.Getenv("ORDER_PAGE_SIZE"), cfg.OrderPageSize), &cfg.OrderPageSize)
+		assign(&problems, "BANK_ACCOUNT_PAGE_SIZE", parsePositiveInt(os.Getenv("BANK_ACCOUNT_PAGE_SIZE"), cfg.BankAccountPageSize), &cfg.BankAccountPageSize)
+		cfg.PaymentReferencePrefix = envOrDefault("PAYMENT_REFERENCE_PREFIX", cfg.PaymentReferencePrefix)
+		cfg.VietQRBaseURL = envOrDefault("VIETQR_BASE_URL", cfg.VietQRBaseURL)
+		cfg.VietQRTemplate = envOrDefault("VIETQR_TEMPLATE", cfg.VietQRTemplate)
 		assign(&problems, "ADMIN_TELEGRAM_IDS", parseAdminIDs(os.Getenv("ADMIN_TELEGRAM_IDS")), &cfg.AdminTelegramIDs)
 		assign(&problems, "INVENTORY_ENCRYPTION_KEY", parseEncryptionKey(os.Getenv("INVENTORY_ENCRYPTION_KEY")), &cfg.InventoryEncryptionKey)
 		assign(&problems, "INVENTORY_ENCRYPTION_KEY_VERSION", parsePositiveInt32(os.Getenv("INVENTORY_ENCRYPTION_KEY_VERSION"), cfg.InventoryEncryptionKeyVersion), &cfg.InventoryEncryptionKeyVersion)
 		assign(&problems, "INVENTORY_IMPORT_MAX_ITEMS", parsePositiveInt(os.Getenv("INVENTORY_IMPORT_MAX_ITEMS"), cfg.InventoryImportMaxItems), &cfg.InventoryImportMaxItems)
 		assign(&problems, "INVENTORY_IMPORT_MAX_ITEM_BYTES", parsePositiveInt(os.Getenv("INVENTORY_IMPORT_MAX_ITEM_BYTES"), cfg.InventoryImportMaxItemBytes), &cfg.InventoryImportMaxItemBytes)
 		assign(&problems, "INVENTORY_IMPORT_MAX_TOTAL_BYTES", parsePositiveInt(os.Getenv("INVENTORY_IMPORT_MAX_TOTAL_BYTES"), cfg.InventoryImportMaxTotalBytes), &cfg.InventoryImportMaxTotalBytes)
+		assign(&problems, "BANK_ACCOUNT_ENCRYPTION_KEY", parseEncryptionKey(os.Getenv("BANK_ACCOUNT_ENCRYPTION_KEY")), &cfg.BankAccountEncryptionKey)
+		assign(&problems, "BANK_ACCOUNT_ENCRYPTION_KEY_VERSION", parsePositiveInt32(os.Getenv("BANK_ACCOUNT_ENCRYPTION_KEY_VERSION"), cfg.BankAccountEncryptionVersion), &cfg.BankAccountEncryptionVersion)
 		assign(&problems, "TELEGRAM_WEBHOOK_BODY_LIMIT_BYTES", parsePositiveInt64(os.Getenv("TELEGRAM_WEBHOOK_BODY_LIMIT_BYTES"), cfg.TelegramWebhookBodyLimit), &cfg.TelegramWebhookBodyLimit)
 		assign(&problems, "TELEGRAM_WEBHOOK_TIMEOUT_SECONDS", parsePositiveDuration(os.Getenv("TELEGRAM_WEBHOOK_TIMEOUT_SECONDS"), time.Second, cfg.TelegramWebhookTimeout), &cfg.TelegramWebhookTimeout)
 		assign(&problems, "TELEGRAM_UPDATE_STALE_SECONDS", parsePositiveDuration(os.Getenv("TELEGRAM_UPDATE_STALE_SECONDS"), time.Second, cfg.TelegramUpdateStaleAfter), &cfg.TelegramUpdateStaleAfter)
 		assign(&problems, "ADMIN_SESSION_TTL_MINUTES", parsePositiveDuration(os.Getenv("ADMIN_SESSION_TTL_MINUTES"), time.Minute, cfg.AdminSessionTTL), &cfg.AdminSessionTTL)
 		assign(&problems, "TELEGRAM_API_TIMEOUT_SECONDS", parsePositiveDuration(os.Getenv("TELEGRAM_API_TIMEOUT_SECONDS"), time.Second, cfg.TelegramAPITimeout), &cfg.TelegramAPITimeout)
+	} else {
+		assign(&problems, "ORDER_EXPIRY_INTERVAL", parsePositiveDuration(os.Getenv("ORDER_EXPIRY_INTERVAL"), time.Second, cfg.OrderExpiryInterval), &cfg.OrderExpiryInterval)
+		assign(&problems, "ORDER_EXPIRY_BATCH_SIZE", parsePositiveInt32(os.Getenv("ORDER_EXPIRY_BATCH_SIZE"), cfg.OrderExpiryBatchSize), &cfg.OrderExpiryBatchSize)
+		assign(&problems, "ORDER_EXPIRY_RUN_TIMEOUT", parsePositiveDuration(os.Getenv("ORDER_EXPIRY_RUN_TIMEOUT"), time.Second, cfg.OrderExpiryRunTimeout), &cfg.OrderExpiryRunTimeout)
 	}
 
 	problems = append(problems, validate(cfg, process)...)
@@ -223,11 +270,45 @@ func validate(cfg Config, process processKind) []error {
 		if cfg.InventoryImportMaxItemBytes > cfg.InventoryImportMaxTotalBytes {
 			problems = append(problems, errors.New("INVENTORY_IMPORT_MAX_ITEM_BYTES cannot exceed INVENTORY_IMPORT_MAX_TOTAL_BYTES"))
 		}
+		if len(cfg.BankAccountEncryptionKey) != 32 {
+			problems = append(problems, errors.New("BANK_ACCOUNT_ENCRYPTION_KEY must decode to exactly 32 bytes"))
+		}
+		if cfg.BankAccountEncryptionVersion <= 0 {
+			problems = append(problems, errors.New("BANK_ACCOUNT_ENCRYPTION_KEY_VERSION must be positive"))
+		}
+		if cfg.OrderMaxQuantity <= 0 || cfg.OrderMaxQuantity > 1000 {
+			problems = append(problems, errors.New("ORDER_MAX_QUANTITY must be between 1 and 1000"))
+		}
+		if cfg.PaymentReferenceRandomBytes < 4 || cfg.PaymentReferenceRandomBytes > 24 || !validReferencePrefix(cfg.PaymentReferencePrefix) {
+			problems = append(problems, errors.New("payment reference configuration is invalid"))
+		}
+		if cfg.OrderPageSize > 20 || cfg.BankAccountPageSize > 20 {
+			problems = append(problems, errors.New("order and bank page sizes must not exceed 20"))
+		}
+		vietQRURL, err := url.Parse(cfg.VietQRBaseURL)
+		if err != nil || vietQRURL.Scheme != "https" || vietQRURL.Host == "" || strings.TrimSpace(cfg.VietQRTemplate) == "" {
+			problems = append(problems, errors.New("VietQR configuration is invalid"))
+		}
+	} else if cfg.OrderExpiryBatchSize <= 0 || cfg.OrderExpiryBatchSize > 1000 {
+		problems = append(problems, errors.New("ORDER_EXPIRY_BATCH_SIZE must be between 1 and 1000"))
 	}
 	if cfg.DatabaseMinConnections > cfg.DatabaseMaxConnections {
 		problems = append(problems, errors.New("DATABASE_MIN_CONNECTIONS cannot exceed DATABASE_MAX_CONNECTIONS"))
 	}
 	return problems
+}
+
+func validReferencePrefix(value string) bool {
+	value = strings.TrimSpace(strings.ToUpper(value))
+	if len(value) < 1 || len(value) > 12 {
+		return false
+	}
+	for _, char := range value {
+		if (char < 'A' || char > 'Z') && (char < '0' || char > '9') {
+			return false
+		}
+	}
+	return true
 }
 
 func parseAdminIDs(raw string) parseResult[[]int64] {

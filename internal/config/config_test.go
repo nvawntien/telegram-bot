@@ -34,6 +34,9 @@ func TestLoadValidConfig(t *testing.T) {
 		cfg.InventoryImportMaxItemBytes != 4096 || cfg.InventoryImportMaxTotalBytes != 256*1024 {
 		t.Fatalf("Phase 4 defaults are invalid: %#v", cfg)
 	}
+	if cfg.OrderMaxQuantity != 10 || cfg.PaymentReferencePrefix != "TS" || cfg.PaymentReferenceRandomBytes != 6 || cfg.BankAccountEncryptionVersion != 1 {
+		t.Fatalf("Phase 5 defaults are invalid: %#v", cfg)
+	}
 }
 
 func TestLoadReportsAllInvalidValues(t *testing.T) {
@@ -145,4 +148,5 @@ func setValidEnvironment(t *testing.T) {
 	t.Setenv("TELEGRAM_WEBHOOK_URL", "http://localhost:8080/webhooks/telegram")
 	t.Setenv("ADMIN_TELEGRAM_IDS", "123")
 	t.Setenv("INVENTORY_ENCRYPTION_KEY", validEncryptionKey)
+	t.Setenv("BANK_ACCOUNT_ENCRYPTION_KEY", validEncryptionKey)
 }

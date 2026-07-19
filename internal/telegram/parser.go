@@ -46,6 +46,13 @@ const (
 	CallbackCategories              CallbackAction = "categories"
 	CallbackProducts                CallbackAction = "products"
 	CallbackProductDetail           CallbackAction = "product_detail"
+	CallbackOrderQuantity           CallbackAction = "order_quantity"
+	CallbackOrderBank               CallbackAction = "order_bank"
+	CallbackOrderConfirm            CallbackAction = "order_confirm"
+	CallbackOrders                  CallbackAction = "orders"
+	CallbackOrderView               CallbackAction = "order_view"
+	CallbackOrderAskCancel          CallbackAction = "order_ask_cancel"
+	CallbackOrderCancel             CallbackAction = "order_cancel"
 	CallbackAdminCategories         CallbackAction = "admin_categories"
 	CallbackAdminProducts           CallbackAction = "admin_products"
 	CallbackAdminCategoryNew        CallbackAction = "admin_category_new"
@@ -61,6 +68,11 @@ const (
 	CallbackAdminInventoryImport    CallbackAction = "admin_inventory_import"
 	CallbackAdminInventoryAskToggle CallbackAction = "admin_inventory_ask_toggle"
 	CallbackAdminInventoryToggle    CallbackAction = "admin_inventory_toggle"
+	CallbackAdminBanks              CallbackAction = "admin_banks"
+	CallbackAdminBankNew            CallbackAction = "admin_bank_new"
+	CallbackAdminBankEdit           CallbackAction = "admin_bank_edit"
+	CallbackAdminBankAskToggle      CallbackAction = "admin_bank_ask_toggle"
+	CallbackAdminBankToggle         CallbackAction = "admin_bank_toggle"
 	CallbackAdminCancel             CallbackAction = "admin_cancel"
 )
 
@@ -69,6 +81,10 @@ type Callback struct {
 	Page           int
 	CategoryID     int64
 	ProductID      int64
+	BankAccountID  int64
+	OrderID        int64
+	FlowID         int64
+	Quantity       int32
 	InventoryID    int64
 	RecordVersion  int64
 	SessionID      int64
@@ -116,8 +132,85 @@ func ParseCallback(data string) (Callback, error) {
 		}
 		page, err := nonNegative(parts[4])
 		return Callback{Action: CallbackProductDetail, ProductID: productID, CategoryID: categoryID, Page: int(page)}, err
+	case "o":
+		return parseOrderCallback(parts)
 	case "a":
 		return parseAdminCallback(parts)
+	default:
+		return Callback{}, ErrInvalidCallback
+	}
+}
+
+func parseOrderCallback(parts []string) (Callback, error) {
+	if len(parts) < 3 {
+		return Callback{}, ErrInvalidCallback
+	}
+	switch parts[2] {
+	case "q":
+		if len(parts) != 5 {
+			return Callback{}, ErrInvalidCallback
+		}
+		productID, err := positive(parts[3])
+		if err != nil {
+			return Callback{}, err
+		}
+		quantity, err := positiveInt32(parts[4])
+		return Callback{Action: CallbackOrderQuantity, ProductID: productID, Quantity: quantity}, err
+	case "b":
+		if len(parts) != 6 {
+			return Callback{}, ErrInvalidCallback
+		}
+		productID, err := positive(parts[3])
+		if err != nil {
+			return Callback{}, err
+		}
+		quantity, err := positiveInt32(parts[4])
+		if err != nil {
+			return Callback{}, err
+		}
+		bankID, err := positive(parts[5])
+		return Callback{Action: CallbackOrderBank, ProductID: productID, Quantity: quantity, BankAccountID: bankID}, err
+	case "c":
+		if len(parts) != 7 {
+			return Callback{}, ErrInvalidCallback
+		}
+		flowID, err := positive(parts[3])
+		if err != nil {
+			return Callback{}, err
+		}
+		productID, err := positive(parts[4])
+		if err != nil {
+			return Callback{}, err
+		}
+		quantity, err := positiveInt32(parts[5])
+		if err != nil {
+			return Callback{}, err
+		}
+		bankID, err := positive(parts[6])
+		return Callback{Action: CallbackOrderConfirm, FlowID: flowID, ProductID: productID, Quantity: quantity, BankAccountID: bankID}, err
+	case "l":
+		page, err := parseNonNegative(parts, 3, 4)
+		return Callback{Action: CallbackOrders, Page: int(page)}, err
+	case "v":
+		if len(parts) != 4 {
+			return Callback{}, ErrInvalidCallback
+		}
+		orderID, err := positive(parts[3])
+		return Callback{Action: CallbackOrderView, OrderID: orderID}, err
+	case "x", "k":
+		if len(parts) != 5 {
+			return Callback{}, ErrInvalidCallback
+		}
+		orderID, err := positive(parts[3])
+		if err != nil {
+			return Callback{}, err
+		}
+		version, err := positive(parts[4])
+		action := CallbackOrderAskCancel
+		if parts[2] == "k" {
+			action = CallbackOrderCancel
+		}
+		return Callback{Action: action, OrderID: orderID, RecordVersion: version}, err
 	default:
 		return Callback{}, ErrInvalidCallback
 	}
@@ -128,6 +221,57 @@ func parseAdminCallback(parts []string) (Callback, error) {
 		return Callback{}, ErrInvalidCallback
 	}
 	switch parts[2] {
+	case "b":
+		page, err := parseNonNegative(parts, 3, 4)
+		return Callback{Action: CallbackAdminBanks, Page: int(page)}, err
+	case "bn":
+		return exact(parts, 3, Callback{Action: CallbackAdminBankNew})
+	case "be":
+		if len(parts) != 5 {
+			return Callback{}, ErrInvalidCallback
+		}
+		bankID, err := positive(parts[3])
+		if err != nil {
+			return Callback{}, err
+		}
+		version, err := positive(parts[4])
+		return Callback{Action: CallbackAdminBankEdit, BankAccountID: bankID, RecordVersion: version}, err
+	case "ba":
+		if len(parts) != 6 {
+			return Callback{}, ErrInvalidCallback
+		}
+		bankID, err := positive(parts[3])
+		if err != nil {
+			return Callback{}, err
+		}
+		version, err := positive(parts[4])
+		if err != nil {
+			return Callback{}, err
+		}
+		active, err := parseBoolBit(parts[5])
+		return Callback{Action: CallbackAdminBankAskToggle, BankAccountID: bankID, RecordVersion: version, Active: active}, err
+	case "bt":
+		if len(parts) != 8 {
+			return Callback{}, ErrInvalidCallback
+		}
+		sessionID, err := positive(parts[3])
+		if err != nil {
+			return Callback{}, err
+		}
+		sessionVersion, err := positive(parts[4])
+		if err != nil {
+			return Callback{}, err
+		}
+		bankID, err := positive(parts[5])
+		if err != nil {
+			return Callback{}, err
+		}
+		version, err := positive(parts[6])
+		if err != nil {
+			return Callback{}, err
+		}
+		active, err := parseBoolBit(parts[7])
+		return Callback{Action: CallbackAdminBankToggle, SessionID: sessionID, SessionVersion: sessionVersion, BankAccountID: bankID, RecordVersion: version, Active: active}, err
 	case "c", "p":
 		page, err := parseNonNegative(parts, 3, 4)
 		action := CallbackAdminCategories
@@ -324,6 +468,14 @@ func nonNegative(raw string) (int64, error) {
 		return 0, ErrInvalidCallback
 	}
 	return value, nil
+}
+
+func positiveInt32(raw string) (int32, error) {
+	value, err := strconv.ParseInt(raw, 10, 32)
+	if err != nil || value <= 0 {
+		return 0, ErrInvalidCallback
+	}
+	return int32(value), nil
 }
 
 func parseBoolBit(raw string) (bool, error) {
