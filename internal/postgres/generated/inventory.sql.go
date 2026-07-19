@@ -97,6 +97,26 @@ func (q *Queries) CountAvailableInventoryByProduct(ctx context.Context, productI
 	return column_1, err
 }
 
+const countExpiredReservationsByOrder = `-- name: CountExpiredReservationsByOrder :one
+SELECT count(*)::bigint
+FROM inventory_items
+WHERE reserved_order_id = $1
+  AND status = 'reserved'
+  AND reserved_until <= $2
+`
+
+type CountExpiredReservationsByOrderParams struct {
+	OrderID   pgtype.Int8        `db:"order_id" json:"order_id"`
+	ExpiredAt pgtype.Timestamptz `db:"expired_at" json:"expired_at"`
+}
+
+func (q *Queries) CountExpiredReservationsByOrder(ctx context.Context, arg CountExpiredReservationsByOrderParams) (int64, error) {
+	row := q.db.QueryRow(ctx, countExpiredReservationsByOrder, arg.OrderID, arg.ExpiredAt)
+	var column_1 int64
+	err := row.Scan(&column_1)
+	return column_1, err
+}
+
 const countInventoryOverviewProducts = `-- name: CountInventoryOverviewProducts :one
 SELECT count(*)::bigint
 FROM products
@@ -543,6 +563,41 @@ func (q *Queries) LockOrderItemForInventory(ctx context.Context, arg LockOrderIt
 		&i.UnitPriceVnd,
 		&i.Quantity,
 		&i.LineTotalVnd,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
+const lockRedactedInventoryItem = `-- name: LockRedactedInventoryItem :one
+SELECT id, product_id, status, reserved_order_id, reserved_until,
+       encryption_key_version, version, created_at
+FROM inventory_items
+WHERE id = $1
+FOR UPDATE
+`
+
+type LockRedactedInventoryItemRow struct {
+	ID                   int64              `db:"id" json:"id"`
+	ProductID            int64              `db:"product_id" json:"product_id"`
+	Status               string             `db:"status" json:"status"`
+	ReservedOrderID      pgtype.Int8        `db:"reserved_order_id" json:"reserved_order_id"`
+	ReservedUntil        pgtype.Timestamptz `db:"reserved_until" json:"reserved_until"`
+	EncryptionKeyVersion int32              `db:"encryption_key_version" json:"encryption_key_version"`
+	Version              int64              `db:"version" json:"version"`
+	CreatedAt            pgtype.Timestamptz `db:"created_at" json:"created_at"`
+}
+
+func (q *Queries) LockRedactedInventoryItem(ctx context.Context, id int64) (LockRedactedInventoryItemRow, error) {
+	row := q.db.QueryRow(ctx, lockRedactedInventoryItem, id)
+	var i LockRedactedInventoryItemRow
+	err := row.Scan(
+		&i.ID,
+		&i.ProductID,
+		&i.Status,
+		&i.ReservedOrderID,
+		&i.ReservedUntil,
+		&i.EncryptionKeyVersion,
+		&i.Version,
 		&i.CreatedAt,
 	)
 	return i, err

@@ -131,6 +131,95 @@ type ProductSnapshot struct {
 	Version     int64  `json:"version"`
 }
 
+type EncryptedInventoryPayload struct {
+	Ciphertext  []byte
+	Nonce       []byte
+	Fingerprint []byte
+	KeyVersion  int32
+	Format      string
+}
+
+type InventoryOverview struct {
+	ProductID      int64
+	ProductName    string
+	AvailableCount int64
+	ReservedCount  int64
+	SoldCount      int64
+	DisabledCount  int64
+	TotalCount     int64
+}
+
+type InventoryOverviewPage struct {
+	Items []InventoryOverview
+	Page  PageInfo
+}
+
+type RedactedInventoryItem struct {
+	ID              int64
+	ProductID       int64
+	ProductName     string
+	Status          domain.InventoryStatus
+	ReservedOrderID int64
+	ReservedUntil   time.Time
+	KeyVersion      int32
+	Version         int64
+	CreatedAt       time.Time
+}
+
+type RedactedInventoryPage struct {
+	Items []RedactedInventoryItem
+	Page  PageInfo
+}
+
+type InventoryImportLimits struct {
+	MaxItems      int
+	MaxItemBytes  int
+	MaxTotalBytes int
+}
+
+type InventoryImportResult struct {
+	ProductID  int64
+	Requested  int
+	Inserted   int
+	Duplicates int
+	Rejected   int
+	KeyVersion int32
+}
+
+type InventoryClaimRequest struct {
+	OrderID       int64
+	OrderItemID   int64
+	ProductID     int64
+	Quantity      int32
+	ReservedUntil time.Time
+	RequestID     string
+}
+
+type InventoryClaimResult struct {
+	OrderID          int64
+	InventoryItemIDs []int64
+	Count            int
+}
+
+type InventoryReleaseRequest struct {
+	OrderID   int64
+	Reason    domain.InventoryReleaseReason
+	RequestID string
+}
+
+type InventoryReleaseResult struct {
+	OrderID  int64
+	Released int
+	Reason   domain.InventoryReleaseReason
+}
+
+type InventoryRecoveryResult struct {
+	OrderID          int64
+	Released         int
+	RecoveryRequired bool
+	OrderStatus      domain.OrderStatus
+}
+
 func pageInfo(page, size int, total int64) PageInfo {
 	totalPages := 0
 	if total > 0 {

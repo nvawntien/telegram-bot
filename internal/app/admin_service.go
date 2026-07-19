@@ -13,12 +13,14 @@ import (
 )
 
 const (
-	SessionCategoryCreate = "category.create"
-	SessionCategoryEdit   = "category.edit"
-	SessionCategoryToggle = "category.toggle"
-	SessionProductCreate  = "product.create"
-	SessionProductEdit    = "product.edit"
-	SessionProductToggle  = "product.toggle"
+	SessionCategoryCreate  = "category.create"
+	SessionCategoryEdit    = "category.edit"
+	SessionCategoryToggle  = "category.toggle"
+	SessionProductCreate   = "product.create"
+	SessionProductEdit     = "product.edit"
+	SessionProductToggle   = "product.toggle"
+	SessionInventoryImport = "inventory.import"
+	SessionInventoryToggle = "inventory.toggle"
 )
 
 type AdminRepository interface {
@@ -313,7 +315,8 @@ func normalizeProduct(name, slug, description *string) {
 func validSessionState(state string) bool {
 	switch state {
 	case SessionCategoryCreate, SessionCategoryEdit, SessionCategoryToggle,
-		SessionProductCreate, SessionProductEdit, SessionProductToggle:
+		SessionProductCreate, SessionProductEdit, SessionProductToggle,
+		SessionInventoryImport, SessionInventoryToggle:
 		return true
 	default:
 		return false

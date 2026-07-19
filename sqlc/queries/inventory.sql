@@ -77,6 +77,13 @@ SELECT *
 FROM inventory_items
 WHERE id = sqlc.arg(id);
 
+-- name: LockRedactedInventoryItem :one
+SELECT id, product_id, status, reserved_order_id, reserved_until,
+       encryption_key_version, version, created_at
+FROM inventory_items
+WHERE id = sqlc.arg(id)
+FOR UPDATE;
+
 -- name: DisableAvailableInventoryItem :one
 UPDATE inventory_items
 SET status = 'disabled',
@@ -152,6 +159,13 @@ WHERE reserved_order_id = sqlc.arg(order_id)
   AND status = 'reserved'
 ORDER BY id
 FOR UPDATE;
+
+-- name: CountExpiredReservationsByOrder :one
+SELECT count(*)::bigint
+FROM inventory_items
+WHERE reserved_order_id = sqlc.arg(order_id)
+  AND status = 'reserved'
+  AND reserved_until <= sqlc.arg(expired_at);
 
 -- name: ReleaseReservedInventoryByOrder :many
 UPDATE inventory_items
