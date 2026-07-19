@@ -57,6 +57,7 @@ type Querier interface {
 	GetAdminAuthorizationByTelegramID(ctx context.Context, telegramUserID int64) (GetAdminAuthorizationByTelegramIDRow, error)
 	GetCategoryByID(ctx context.Context, id int64) (Category, error)
 	GetEncryptedInventoryItem(ctx context.Context, id int64) (InventoryItem, error)
+	GetFinancialReconciliation(ctx context.Context) (GetFinancialReconciliationRow, error)
 	GetOrderByID(ctx context.Context, id int64) (Order, error)
 	GetOrderDetailOwnedByTelegramUser(ctx context.Context, arg GetOrderDetailOwnedByTelegramUserParams) (GetOrderDetailOwnedByTelegramUserRow, error)
 	GetOrderOwnedByUser(ctx context.Context, arg GetOrderOwnedByUserParams) (Order, error)

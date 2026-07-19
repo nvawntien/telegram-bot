@@ -7,6 +7,7 @@ import (
 	"crypto/sha256"
 	"encoding/json"
 	"fmt"
+	"sync"
 	"testing"
 	"time"
 
@@ -103,6 +104,119 @@ func TestPhase6DuplicateEventAndTransactionAreIdempotent(t *testing.T) {
 	}
 	if err := database.pool.QueryRow(context.Background(), `SELECT count(*) FROM order_inventory_items WHERE order_id=$1`, order.ID).Scan(&mappings); err != nil || mappings != 1 {
 		t.Fatalf("mappings = %d, err=%v", mappings, err)
+	}
+}
+
+func TestPhase6MismatchAndLatePaymentsRemainReviewOnly(t *testing.T) {
+	database := newTestDatabase(t, true)
+	order, productID := createPhase6PaymentOrder(t, database, 1)
+	database.createInventory(t, productID, "available", pgtype.Int8{}, pgtype.Timestamptz{}, pgtype.Int8{})
+	mismatch := phase6Event(t, order, "transaction-mismatch")
+	mismatch.Amount++
+	metadata, _ := json.Marshal(map[string]any{"reference": mismatch.Reference, "amount_vnd": mismatch.Amount.Int64(), "currency": "VND", "occurred_at": mismatch.OccurredAt})
+	mismatch.SanitizedMetadata = metadata
+	store := postgres.NewAppStore(database.pool)
+	if _, err := app.NewPaymentEventIngestionService(store, 5).Ingest(context.Background(), mismatch); err != nil {
+		t.Fatal(err)
+	}
+	job := app.NewPaymentEventJob(store, app.NewPaymentAcceptanceService(store, time.Hour, nil), 10, time.Millisecond, time.Minute)
+	if _, err := job.RunOnce(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	var status, reason string
+	var mappings int
+	ctx := context.Background()
+	_ = database.pool.QueryRow(ctx, `SELECT status FROM orders WHERE id=$1`, order.ID).Scan(&status)
+	_ = database.pool.QueryRow(ctx, `SELECT reason FROM payment_review_cases WHERE order_id=$1`, order.ID).Scan(&reason)
+	_ = database.pool.QueryRow(ctx, `SELECT count(*) FROM order_inventory_items WHERE order_id=$1`, order.ID).Scan(&mappings)
+	if status != "pending_payment" || reason != "amount_mismatch" || mappings != 0 {
+		t.Fatalf("mismatch status=%s reason=%s mappings=%d", status, reason, mappings)
+	}
+
+	lateOrder, lateProductID := createPhase6PaymentOrder(t, database, 1)
+	database.createInventory(t, lateProductID, "available", pgtype.Int8{}, pgtype.Timestamptz{}, pgtype.Int8{})
+	if _, err := database.pool.Exec(ctx, `UPDATE orders SET status='expired',expires_at=clock_timestamp()-interval '1 minute' WHERE id=$1`, lateOrder.ID); err != nil {
+		t.Fatal(err)
+	}
+	processPhase6Event(t, database, lateOrder, "transaction-late")
+	_ = database.pool.QueryRow(ctx, `SELECT status FROM orders WHERE id=$1`, lateOrder.ID).Scan(&status)
+	_ = database.pool.QueryRow(ctx, `SELECT reason FROM payment_review_cases WHERE order_id=$1`, lateOrder.ID).Scan(&reason)
+	_ = database.pool.QueryRow(ctx, `SELECT count(*) FROM order_inventory_items WHERE order_id=$1`, lateOrder.ID).Scan(&mappings)
+	if status != "expired" && status != "payment_review" {
+		t.Fatalf("late order status=%s", status)
+	}
+	if reason != "late_or_cancelled" || mappings != 0 {
+		t.Fatalf("late reason=%s mappings=%d", reason, mappings)
+	}
+}
+
+func TestPhase6CompetingPaymentsAndWorkersSettleOnlyOnce(t *testing.T) {
+	database := newTestDatabase(t, true)
+	order, productID := createPhase6PaymentOrder(t, database, 1)
+	database.createInventory(t, productID, "available", pgtype.Int8{}, pgtype.Timestamptz{}, pgtype.Int8{})
+	store := postgres.NewAppStore(database.pool)
+	ingestion := app.NewPaymentEventIngestionService(store, 5)
+	for _, transactionID := range []string{"competing-one", "competing-two"} {
+		if _, err := ingestion.Ingest(context.Background(), phase6Event(t, order, transactionID)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	acceptance := app.NewPaymentAcceptanceService(store, time.Hour, nil)
+	jobs := []*app.PaymentEventJob{
+		app.NewPaymentEventJob(store, acceptance, 1, time.Millisecond, time.Minute),
+		app.NewPaymentEventJob(store, acceptance, 1, time.Millisecond, time.Minute),
+	}
+	var wait sync.WaitGroup
+	errorsByWorker := make(chan error, len(jobs))
+	for _, job := range jobs {
+		wait.Add(1)
+		go func(job *app.PaymentEventJob) {
+			defer wait.Done()
+			_, err := job.RunOnce(context.Background())
+			errorsByWorker <- err
+		}(job)
+	}
+	wait.Wait()
+	close(errorsByWorker)
+	for err := range errorsByWorker {
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	var allocations, mappings, payments, reviews int
+	ctx := context.Background()
+	_ = database.pool.QueryRow(ctx, `SELECT count(*) FROM payment_allocations WHERE target_type='order' AND target_id=$1`, order.ID).Scan(&allocations)
+	_ = database.pool.QueryRow(ctx, `SELECT count(*) FROM order_inventory_items WHERE order_id=$1 AND status='active'`, order.ID).Scan(&mappings)
+	_ = database.pool.QueryRow(ctx, `SELECT count(*) FROM payments WHERE order_id=$1`, order.ID).Scan(&payments)
+	_ = database.pool.QueryRow(ctx, `SELECT count(*) FROM payment_review_cases WHERE order_id=$1 AND reason='competing_payment'`, order.ID).Scan(&reviews)
+	if allocations != 1 || mappings != 1 || payments != 2 || reviews != 1 {
+		t.Fatalf("allocations=%d mappings=%d payments=%d reviews=%d", allocations, mappings, payments, reviews)
+	}
+	reconciliation, err := app.NewReconciliationService(store).Run(ctx)
+	if err != nil || !reconciliation.Clean() {
+		t.Fatalf("reconciliation=%+v err=%v", reconciliation, err)
+	}
+}
+
+func TestPhase6StalePaymentEventIsReclaimed(t *testing.T) {
+	database := newTestDatabase(t, true)
+	order, productID := createPhase6PaymentOrder(t, database, 1)
+	database.createInventory(t, productID, "available", pgtype.Int8{}, pgtype.Timestamptz{}, pgtype.Int8{})
+	store := postgres.NewAppStore(database.pool)
+	result, err := app.NewPaymentEventIngestionService(store, 5).Ingest(context.Background(), phase6Event(t, order, "stale-event"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := database.pool.Exec(context.Background(), `UPDATE payment_events SET processing_status='processing',attempts=1,processing_started_at=clock_timestamp()-interval '10 minutes' WHERE id=$1`, result.EventID); err != nil {
+		t.Fatal(err)
+	}
+	job := app.NewPaymentEventJob(store, app.NewPaymentAcceptanceService(store, time.Hour, nil), 10, time.Millisecond, time.Minute)
+	if count, err := job.RunOnce(context.Background()); err != nil || count != 1 {
+		t.Fatalf("RunOnce()=%d,%v", count, err)
+	}
+	var status string
+	if err := database.pool.QueryRow(context.Background(), `SELECT processing_status FROM payment_events WHERE id=$1`, result.EventID).Scan(&status); err != nil || status != "completed" {
+		t.Fatalf("event status=%s err=%v", status, err)
 	}
 }
 
