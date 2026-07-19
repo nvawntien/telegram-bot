@@ -105,7 +105,7 @@ func TestClaimAvailableInventory(t *testing.T) {
 		if err != nil {
 			t.Fatalf("first worker claim: %v", err)
 		}
-		if len(firstItems) != 1 || firstItems[0].ID != inventoryID {
+		if len(firstItems) != 1 || firstItems[0] != inventoryID {
 			t.Fatalf("first worker claimed %#v, want inventory %d", firstItems, inventoryID)
 		}
 

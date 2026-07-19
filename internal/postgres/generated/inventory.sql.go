@@ -17,6 +17,12 @@ WITH selected_items AS (
     FROM inventory_items AS available
     WHERE available.product_id = $3
       AND available.status = 'available'
+      AND NOT EXISTS (
+          SELECT 1
+          FROM order_inventory_items AS mapping
+          WHERE mapping.inventory_item_id = available.id
+            AND mapping.status = 'active'
+      )
     ORDER BY available.created_at, available.id
     FOR UPDATE SKIP LOCKED
     LIMIT $4::integer
@@ -24,10 +30,11 @@ WITH selected_items AS (
 UPDATE inventory_items AS inventory
 SET status = 'reserved',
     reserved_order_id = $1,
-    reserved_until = $2
+    reserved_until = $2,
+    version = version + 1
 FROM selected_items
 WHERE inventory.id = selected_items.id
-RETURNING inventory.id, inventory.product_id, inventory.encrypted_payload, inventory.encryption_key_id, inventory.payload_fingerprint, inventory.status, inventory.reserved_order_id, inventory.reserved_until, inventory.sold_order_id, inventory.disabled_reason, inventory.created_at, inventory.updated_at
+RETURNING inventory.id
 `
 
 type ClaimAvailableInventoryParams struct {
@@ -37,7 +44,7 @@ type ClaimAvailableInventoryParams struct {
 	Quantity      int32              `db:"quantity" json:"quantity"`
 }
 
-func (q *Queries) ClaimAvailableInventory(ctx context.Context, arg ClaimAvailableInventoryParams) ([]InventoryItem, error) {
+func (q *Queries) ClaimAvailableInventory(ctx context.Context, arg ClaimAvailableInventoryParams) ([]int64, error) {
 	rows, err := q.db.Query(ctx, claimAvailableInventory,
 		arg.OrderID,
 		arg.ReservedUntil,
@@ -48,31 +55,32 @@ func (q *Queries) ClaimAvailableInventory(ctx context.Context, arg ClaimAvailabl
 		return nil, err
 	}
 	defer rows.Close()
-	items := []InventoryItem{}
+	items := []int64{}
 	for rows.Next() {
-		var i InventoryItem
-		if err := rows.Scan(
-			&i.ID,
-			&i.ProductID,
-			&i.EncryptedPayload,
-			&i.EncryptionKeyID,
-			&i.PayloadFingerprint,
-			&i.Status,
-			&i.ReservedOrderID,
-			&i.ReservedUntil,
-			&i.SoldOrderID,
-			&i.DisabledReason,
-			&i.CreatedAt,
-			&i.UpdatedAt,
-		); err != nil {
+		var id int64
+		if err := rows.Scan(&id); err != nil {
 			return nil, err
 		}
-		items = append(items, i)
+		items = append(items, id)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err
 	}
 	return items, nil
+}
+
+const countActiveInventoryMappingsByOrder = `-- name: CountActiveInventoryMappingsByOrder :one
+SELECT count(*)::bigint
+FROM order_inventory_items
+WHERE order_id = $1
+  AND status = 'active'
+`
+
+func (q *Queries) CountActiveInventoryMappingsByOrder(ctx context.Context, orderID int64) (int64, error) {
+	row := q.db.QueryRow(ctx, countActiveInventoryMappingsByOrder, orderID)
+	var column_1 int64
+	err := row.Scan(&column_1)
+	return column_1, err
 }
 
 const countAvailableInventoryByProduct = `-- name: CountAvailableInventoryByProduct :one
@@ -87,4 +95,510 @@ func (q *Queries) CountAvailableInventoryByProduct(ctx context.Context, productI
 	var column_1 int64
 	err := row.Scan(&column_1)
 	return column_1, err
+}
+
+const countInventoryOverviewProducts = `-- name: CountInventoryOverviewProducts :one
+SELECT count(*)::bigint
+FROM products
+WHERE delivery_type = 'inventory'
+`
+
+func (q *Queries) CountInventoryOverviewProducts(ctx context.Context) (int64, error) {
+	row := q.db.QueryRow(ctx, countInventoryOverviewProducts)
+	var column_1 int64
+	err := row.Scan(&column_1)
+	return column_1, err
+}
+
+const countRedactedInventoryByProduct = `-- name: CountRedactedInventoryByProduct :one
+SELECT count(*)::bigint
+FROM inventory_items
+WHERE product_id = $1
+`
+
+func (q *Queries) CountRedactedInventoryByProduct(ctx context.Context, productID int64) (int64, error) {
+	row := q.db.QueryRow(ctx, countRedactedInventoryByProduct, productID)
+	var column_1 int64
+	err := row.Scan(&column_1)
+	return column_1, err
+}
+
+const disableAvailableInventoryItem = `-- name: DisableAvailableInventoryItem :one
+UPDATE inventory_items
+SET status = 'disabled',
+    disabled_reason = $1,
+    version = version + 1
+WHERE id = $2
+  AND status = 'available'
+  AND version = $3
+RETURNING id, product_id, status, reserved_order_id, reserved_until,
+          encryption_key_version, version, created_at
+`
+
+type DisableAvailableInventoryItemParams struct {
+	DisabledReason  pgtype.Text `db:"disabled_reason" json:"disabled_reason"`
+	ID              int64       `db:"id" json:"id"`
+	ExpectedVersion int64       `db:"expected_version" json:"expected_version"`
+}
+
+type DisableAvailableInventoryItemRow struct {
+	ID                   int64              `db:"id" json:"id"`
+	ProductID            int64              `db:"product_id" json:"product_id"`
+	Status               string             `db:"status" json:"status"`
+	ReservedOrderID      pgtype.Int8        `db:"reserved_order_id" json:"reserved_order_id"`
+	ReservedUntil        pgtype.Timestamptz `db:"reserved_until" json:"reserved_until"`
+	EncryptionKeyVersion int32              `db:"encryption_key_version" json:"encryption_key_version"`
+	Version              int64              `db:"version" json:"version"`
+	CreatedAt            pgtype.Timestamptz `db:"created_at" json:"created_at"`
+}
+
+func (q *Queries) DisableAvailableInventoryItem(ctx context.Context, arg DisableAvailableInventoryItemParams) (DisableAvailableInventoryItemRow, error) {
+	row := q.db.QueryRow(ctx, disableAvailableInventoryItem, arg.DisabledReason, arg.ID, arg.ExpectedVersion)
+	var i DisableAvailableInventoryItemRow
+	err := row.Scan(
+		&i.ID,
+		&i.ProductID,
+		&i.Status,
+		&i.ReservedOrderID,
+		&i.ReservedUntil,
+		&i.EncryptionKeyVersion,
+		&i.Version,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
+const enableDisabledInventoryItem = `-- name: EnableDisabledInventoryItem :one
+UPDATE inventory_items
+SET status = 'available',
+    disabled_reason = NULL,
+    version = version + 1
+WHERE id = $1
+  AND status = 'disabled'
+  AND version = $2
+RETURNING id, product_id, status, reserved_order_id, reserved_until,
+          encryption_key_version, version, created_at
+`
+
+type EnableDisabledInventoryItemParams struct {
+	ID              int64 `db:"id" json:"id"`
+	ExpectedVersion int64 `db:"expected_version" json:"expected_version"`
+}
+
+type EnableDisabledInventoryItemRow struct {
+	ID                   int64              `db:"id" json:"id"`
+	ProductID            int64              `db:"product_id" json:"product_id"`
+	Status               string             `db:"status" json:"status"`
+	ReservedOrderID      pgtype.Int8        `db:"reserved_order_id" json:"reserved_order_id"`
+	ReservedUntil        pgtype.Timestamptz `db:"reserved_until" json:"reserved_until"`
+	EncryptionKeyVersion int32              `db:"encryption_key_version" json:"encryption_key_version"`
+	Version              int64              `db:"version" json:"version"`
+	CreatedAt            pgtype.Timestamptz `db:"created_at" json:"created_at"`
+}
+
+func (q *Queries) EnableDisabledInventoryItem(ctx context.Context, arg EnableDisabledInventoryItemParams) (EnableDisabledInventoryItemRow, error) {
+	row := q.db.QueryRow(ctx, enableDisabledInventoryItem, arg.ID, arg.ExpectedVersion)
+	var i EnableDisabledInventoryItemRow
+	err := row.Scan(
+		&i.ID,
+		&i.ProductID,
+		&i.Status,
+		&i.ReservedOrderID,
+		&i.ReservedUntil,
+		&i.EncryptionKeyVersion,
+		&i.Version,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
+const getEncryptedInventoryItem = `-- name: GetEncryptedInventoryItem :one
+SELECT id, product_id, encrypted_payload, encryption_key_id, payload_fingerprint, status, reserved_order_id, reserved_until, sold_order_id, disabled_reason, created_at, updated_at, encryption_nonce, encryption_format, encryption_key_version, imported_by_admin_id, version
+FROM inventory_items
+WHERE id = $1
+`
+
+func (q *Queries) GetEncryptedInventoryItem(ctx context.Context, id int64) (InventoryItem, error) {
+	row := q.db.QueryRow(ctx, getEncryptedInventoryItem, id)
+	var i InventoryItem
+	err := row.Scan(
+		&i.ID,
+		&i.ProductID,
+		&i.EncryptedPayload,
+		&i.EncryptionKeyID,
+		&i.PayloadFingerprint,
+		&i.Status,
+		&i.ReservedOrderID,
+		&i.ReservedUntil,
+		&i.SoldOrderID,
+		&i.DisabledReason,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.EncryptionNonce,
+		&i.EncryptionFormat,
+		&i.EncryptionKeyVersion,
+		&i.ImportedByAdminID,
+		&i.Version,
+	)
+	return i, err
+}
+
+const insertEncryptedInventoryItem = `-- name: InsertEncryptedInventoryItem :one
+INSERT INTO inventory_items (
+    product_id,
+    encrypted_payload,
+    encryption_key_id,
+    encryption_nonce,
+    encryption_format,
+    encryption_key_version,
+    payload_fingerprint,
+    imported_by_admin_id
+) VALUES (
+    $1,
+    $2,
+    $3,
+    $4,
+    'aes-256-gcm-v1',
+    $5,
+    $6,
+    $7
+)
+ON CONFLICT (product_id, payload_fingerprint) DO NOTHING
+RETURNING id
+`
+
+type InsertEncryptedInventoryItemParams struct {
+	ProductID            int64       `db:"product_id" json:"product_id"`
+	EncryptedPayload     []byte      `db:"encrypted_payload" json:"encrypted_payload"`
+	EncryptionKeyID      string      `db:"encryption_key_id" json:"encryption_key_id"`
+	EncryptionNonce      []byte      `db:"encryption_nonce" json:"encryption_nonce"`
+	EncryptionKeyVersion int32       `db:"encryption_key_version" json:"encryption_key_version"`
+	PayloadFingerprint   []byte      `db:"payload_fingerprint" json:"payload_fingerprint"`
+	ImportedByAdminID    pgtype.Int8 `db:"imported_by_admin_id" json:"imported_by_admin_id"`
+}
+
+func (q *Queries) InsertEncryptedInventoryItem(ctx context.Context, arg InsertEncryptedInventoryItemParams) (int64, error) {
+	row := q.db.QueryRow(ctx, insertEncryptedInventoryItem,
+		arg.ProductID,
+		arg.EncryptedPayload,
+		arg.EncryptionKeyID,
+		arg.EncryptionNonce,
+		arg.EncryptionKeyVersion,
+		arg.PayloadFingerprint,
+		arg.ImportedByAdminID,
+	)
+	var id int64
+	err := row.Scan(&id)
+	return id, err
+}
+
+const insertInventoryRecoveryAuditOnce = `-- name: InsertInventoryRecoveryAuditOnce :one
+INSERT INTO audit_logs (
+    actor_type,
+    action,
+    resource_type,
+    resource_id,
+    after_data,
+    request_id
+)
+SELECT
+    'system',
+    'inventory.reservation_recovery_required',
+    'order',
+    $1::bigint,
+    jsonb_build_object(
+        'order_id', $1::bigint,
+        'order_status', $2::text
+    ),
+    $3
+WHERE NOT EXISTS (
+    SELECT 1
+    FROM audit_logs
+    WHERE action = 'inventory.reservation_recovery_required'
+      AND resource_type = 'order'
+      AND resource_id = $1::bigint
+      AND after_data ->> 'order_status' = $2::text
+)
+RETURNING id
+`
+
+type InsertInventoryRecoveryAuditOnceParams struct {
+	OrderID     int64       `db:"order_id" json:"order_id"`
+	OrderStatus string      `db:"order_status" json:"order_status"`
+	RequestID   pgtype.Text `db:"request_id" json:"request_id"`
+}
+
+func (q *Queries) InsertInventoryRecoveryAuditOnce(ctx context.Context, arg InsertInventoryRecoveryAuditOnceParams) (int64, error) {
+	row := q.db.QueryRow(ctx, insertInventoryRecoveryAuditOnce, arg.OrderID, arg.OrderStatus, arg.RequestID)
+	var id int64
+	err := row.Scan(&id)
+	return id, err
+}
+
+const insertOrderInventoryMapping = `-- name: InsertOrderInventoryMapping :exec
+INSERT INTO order_inventory_items (
+    order_id,
+    order_item_id,
+    inventory_item_id,
+    status
+) VALUES (
+    $1,
+    $2,
+    $3,
+    'active'
+)
+`
+
+type InsertOrderInventoryMappingParams struct {
+	OrderID         int64 `db:"order_id" json:"order_id"`
+	OrderItemID     int64 `db:"order_item_id" json:"order_item_id"`
+	InventoryItemID int64 `db:"inventory_item_id" json:"inventory_item_id"`
+}
+
+func (q *Queries) InsertOrderInventoryMapping(ctx context.Context, arg InsertOrderInventoryMappingParams) error {
+	_, err := q.db.Exec(ctx, insertOrderInventoryMapping, arg.OrderID, arg.OrderItemID, arg.InventoryItemID)
+	return err
+}
+
+const listInventoryOverviewPage = `-- name: ListInventoryOverviewPage :many
+SELECT
+    products.id AS product_id,
+    products.name AS product_name,
+    count(inventory.id) FILTER (WHERE inventory.status = 'available')::bigint AS available_count,
+    count(inventory.id) FILTER (WHERE inventory.status = 'reserved')::bigint AS reserved_count,
+    count(inventory.id) FILTER (WHERE inventory.status = 'sold')::bigint AS sold_count,
+    count(inventory.id) FILTER (WHERE inventory.status = 'disabled')::bigint AS disabled_count,
+    count(inventory.id)::bigint AS total_count
+FROM products
+LEFT JOIN inventory_items AS inventory ON inventory.product_id = products.id
+WHERE products.delivery_type = 'inventory'
+GROUP BY products.id, products.name, products.created_at
+ORDER BY products.created_at, products.id
+LIMIT $2
+OFFSET $1
+`
+
+type ListInventoryOverviewPageParams struct {
+	PageOffset int32 `db:"page_offset" json:"page_offset"`
+	PageLimit  int32 `db:"page_limit" json:"page_limit"`
+}
+
+type ListInventoryOverviewPageRow struct {
+	ProductID      int64  `db:"product_id" json:"product_id"`
+	ProductName    string `db:"product_name" json:"product_name"`
+	AvailableCount int64  `db:"available_count" json:"available_count"`
+	ReservedCount  int64  `db:"reserved_count" json:"reserved_count"`
+	SoldCount      int64  `db:"sold_count" json:"sold_count"`
+	DisabledCount  int64  `db:"disabled_count" json:"disabled_count"`
+	TotalCount     int64  `db:"total_count" json:"total_count"`
+}
+
+func (q *Queries) ListInventoryOverviewPage(ctx context.Context, arg ListInventoryOverviewPageParams) ([]ListInventoryOverviewPageRow, error) {
+	rows, err := q.db.Query(ctx, listInventoryOverviewPage, arg.PageOffset, arg.PageLimit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListInventoryOverviewPageRow{}
+	for rows.Next() {
+		var i ListInventoryOverviewPageRow
+		if err := rows.Scan(
+			&i.ProductID,
+			&i.ProductName,
+			&i.AvailableCount,
+			&i.ReservedCount,
+			&i.SoldCount,
+			&i.DisabledCount,
+			&i.TotalCount,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listRedactedInventoryPage = `-- name: ListRedactedInventoryPage :many
+SELECT
+    inventory.id,
+    inventory.product_id,
+    products.name AS product_name,
+    inventory.status,
+    inventory.reserved_order_id,
+    inventory.reserved_until,
+    inventory.encryption_key_version,
+    inventory.version,
+    inventory.created_at
+FROM inventory_items AS inventory
+JOIN products ON products.id = inventory.product_id
+WHERE inventory.product_id = $1
+ORDER BY inventory.created_at, inventory.id
+LIMIT $3
+OFFSET $2
+`
+
+type ListRedactedInventoryPageParams struct {
+	ProductID  int64 `db:"product_id" json:"product_id"`
+	PageOffset int32 `db:"page_offset" json:"page_offset"`
+	PageLimit  int32 `db:"page_limit" json:"page_limit"`
+}
+
+type ListRedactedInventoryPageRow struct {
+	ID                   int64              `db:"id" json:"id"`
+	ProductID            int64              `db:"product_id" json:"product_id"`
+	ProductName          string             `db:"product_name" json:"product_name"`
+	Status               string             `db:"status" json:"status"`
+	ReservedOrderID      pgtype.Int8        `db:"reserved_order_id" json:"reserved_order_id"`
+	ReservedUntil        pgtype.Timestamptz `db:"reserved_until" json:"reserved_until"`
+	EncryptionKeyVersion int32              `db:"encryption_key_version" json:"encryption_key_version"`
+	Version              int64              `db:"version" json:"version"`
+	CreatedAt            pgtype.Timestamptz `db:"created_at" json:"created_at"`
+}
+
+func (q *Queries) ListRedactedInventoryPage(ctx context.Context, arg ListRedactedInventoryPageParams) ([]ListRedactedInventoryPageRow, error) {
+	rows, err := q.db.Query(ctx, listRedactedInventoryPage, arg.ProductID, arg.PageOffset, arg.PageLimit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListRedactedInventoryPageRow{}
+	for rows.Next() {
+		var i ListRedactedInventoryPageRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.ProductID,
+			&i.ProductName,
+			&i.Status,
+			&i.ReservedOrderID,
+			&i.ReservedUntil,
+			&i.EncryptionKeyVersion,
+			&i.Version,
+			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listReservedInventoryIDsByOrder = `-- name: ListReservedInventoryIDsByOrder :many
+SELECT id
+FROM inventory_items
+WHERE reserved_order_id = $1
+  AND status = 'reserved'
+ORDER BY id
+FOR UPDATE
+`
+
+func (q *Queries) ListReservedInventoryIDsByOrder(ctx context.Context, orderID pgtype.Int8) ([]int64, error) {
+	rows, err := q.db.Query(ctx, listReservedInventoryIDsByOrder, orderID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []int64{}
+	for rows.Next() {
+		var id int64
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		items = append(items, id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const lockOrderItemForInventory = `-- name: LockOrderItemForInventory :one
+SELECT id, order_id, product_id, product_name, unit_price_vnd, quantity, line_total_vnd, created_at
+FROM order_items
+WHERE id = $1
+  AND order_id = $2
+  AND product_id = $3
+FOR SHARE
+`
+
+type LockOrderItemForInventoryParams struct {
+	OrderItemID int64 `db:"order_item_id" json:"order_item_id"`
+	OrderID     int64 `db:"order_id" json:"order_id"`
+	ProductID   int64 `db:"product_id" json:"product_id"`
+}
+
+func (q *Queries) LockOrderItemForInventory(ctx context.Context, arg LockOrderItemForInventoryParams) (OrderItem, error) {
+	row := q.db.QueryRow(ctx, lockOrderItemForInventory, arg.OrderItemID, arg.OrderID, arg.ProductID)
+	var i OrderItem
+	err := row.Scan(
+		&i.ID,
+		&i.OrderID,
+		&i.ProductID,
+		&i.ProductName,
+		&i.UnitPriceVnd,
+		&i.Quantity,
+		&i.LineTotalVnd,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
+const markOrderInventoryMappingsReleased = `-- name: MarkOrderInventoryMappingsReleased :execrows
+UPDATE order_inventory_items
+SET status = 'released',
+    released_at = clock_timestamp(),
+    release_reason = $1
+WHERE order_id = $2
+  AND inventory_item_id = ANY($3::bigint[])
+  AND status = 'active'
+`
+
+type MarkOrderInventoryMappingsReleasedParams struct {
+	ReleaseReason    pgtype.Text `db:"release_reason" json:"release_reason"`
+	OrderID          int64       `db:"order_id" json:"order_id"`
+	InventoryItemIds []int64     `db:"inventory_item_ids" json:"inventory_item_ids"`
+}
+
+func (q *Queries) MarkOrderInventoryMappingsReleased(ctx context.Context, arg MarkOrderInventoryMappingsReleasedParams) (int64, error) {
+	result, err := q.db.Exec(ctx, markOrderInventoryMappingsReleased, arg.ReleaseReason, arg.OrderID, arg.InventoryItemIds)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const releaseReservedInventoryByOrder = `-- name: ReleaseReservedInventoryByOrder :many
+UPDATE inventory_items
+SET status = 'available',
+    reserved_order_id = NULL,
+    reserved_until = NULL,
+    version = version + 1
+WHERE reserved_order_id = $1
+  AND status = 'reserved'
+RETURNING id
+`
+
+func (q *Queries) ReleaseReservedInventoryByOrder(ctx context.Context, orderID pgtype.Int8) ([]int64, error) {
+	rows, err := q.db.Query(ctx, releaseReservedInventoryByOrder, orderID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []int64{}
+	for rows.Next() {
+		var id int64
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		items = append(items, id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }

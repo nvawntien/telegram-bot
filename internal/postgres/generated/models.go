@@ -115,18 +115,23 @@ type DeliveryAttempt struct {
 }
 
 type InventoryItem struct {
-	ID                 int64              `db:"id" json:"id"`
-	ProductID          int64              `db:"product_id" json:"product_id"`
-	EncryptedPayload   []byte             `db:"encrypted_payload" json:"encrypted_payload"`
-	EncryptionKeyID    string             `db:"encryption_key_id" json:"encryption_key_id"`
-	PayloadFingerprint []byte             `db:"payload_fingerprint" json:"payload_fingerprint"`
-	Status             string             `db:"status" json:"status"`
-	ReservedOrderID    pgtype.Int8        `db:"reserved_order_id" json:"reserved_order_id"`
-	ReservedUntil      pgtype.Timestamptz `db:"reserved_until" json:"reserved_until"`
-	SoldOrderID        pgtype.Int8        `db:"sold_order_id" json:"sold_order_id"`
-	DisabledReason     pgtype.Text        `db:"disabled_reason" json:"disabled_reason"`
-	CreatedAt          pgtype.Timestamptz `db:"created_at" json:"created_at"`
-	UpdatedAt          pgtype.Timestamptz `db:"updated_at" json:"updated_at"`
+	ID                   int64              `db:"id" json:"id"`
+	ProductID            int64              `db:"product_id" json:"product_id"`
+	EncryptedPayload     []byte             `db:"encrypted_payload" json:"encrypted_payload"`
+	EncryptionKeyID      string             `db:"encryption_key_id" json:"encryption_key_id"`
+	PayloadFingerprint   []byte             `db:"payload_fingerprint" json:"payload_fingerprint"`
+	Status               string             `db:"status" json:"status"`
+	ReservedOrderID      pgtype.Int8        `db:"reserved_order_id" json:"reserved_order_id"`
+	ReservedUntil        pgtype.Timestamptz `db:"reserved_until" json:"reserved_until"`
+	SoldOrderID          pgtype.Int8        `db:"sold_order_id" json:"sold_order_id"`
+	DisabledReason       pgtype.Text        `db:"disabled_reason" json:"disabled_reason"`
+	CreatedAt            pgtype.Timestamptz `db:"created_at" json:"created_at"`
+	UpdatedAt            pgtype.Timestamptz `db:"updated_at" json:"updated_at"`
+	EncryptionNonce      []byte             `db:"encryption_nonce" json:"encryption_nonce"`
+	EncryptionFormat     string             `db:"encryption_format" json:"encryption_format"`
+	EncryptionKeyVersion int32              `db:"encryption_key_version" json:"encryption_key_version"`
+	ImportedByAdminID    pgtype.Int8        `db:"imported_by_admin_id" json:"imported_by_admin_id"`
+	Version              int64              `db:"version" json:"version"`
 }
 
 type Order struct {
@@ -153,6 +158,9 @@ type OrderInventoryItem struct {
 	OrderItemID     int64              `db:"order_item_id" json:"order_item_id"`
 	InventoryItemID int64              `db:"inventory_item_id" json:"inventory_item_id"`
 	CreatedAt       pgtype.Timestamptz `db:"created_at" json:"created_at"`
+	Status          string             `db:"status" json:"status"`
+	ReleasedAt      pgtype.Timestamptz `db:"released_at" json:"released_at"`
+	ReleaseReason   pgtype.Text        `db:"release_reason" json:"release_reason"`
 }
 
 type OrderItem struct {
