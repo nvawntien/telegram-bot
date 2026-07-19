@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
 	"time"
 
 	telegrambot "github.com/go-telegram/bot"
@@ -65,16 +66,21 @@ func (e *APIError) Error() string {
 }
 
 type Client struct {
-	bot     *telegrambot.Bot
-	metrics APIMetrics
+	bot           *telegrambot.Bot
+	metrics       APIMetrics
+	token         string
+	serverURL     string
+	deliveryHTTP  *http.Client
+	responseLimit int64
 }
 
 func NewClient(token, serverURL string, timeout time.Duration, responseLimit int64, metrics APIMetrics) (*Client, error) {
 	if responseLimit <= 0 {
 		responseLimit = defaultResponseBodyLimit
 	}
+	baseHTTPClient := &http.Client{Timeout: timeout}
 	httpClient := &limitedHTTPClient{
-		client: &http.Client{Timeout: timeout},
+		client: baseHTTPClient,
 		limit:  responseLimit,
 	}
 	options := []telegrambot.Option{
@@ -88,7 +94,13 @@ func NewClient(token, serverURL string, timeout time.Duration, responseLimit int
 	if err != nil {
 		return nil, errors.New("initialize Telegram API client")
 	}
-	return &Client{bot: bot, metrics: metrics}, nil
+	if serverURL == "" {
+		serverURL = "https://api.telegram.org"
+	}
+	return &Client{
+		bot: bot, metrics: metrics, token: token, serverURL: strings.TrimRight(serverURL, "/"),
+		deliveryHTTP: baseHTTPClient, responseLimit: responseLimit,
+	}, nil
 }
 
 func (c *Client) SendMessage(ctx context.Context, request SendMessageRequest) error {

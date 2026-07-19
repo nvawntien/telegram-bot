@@ -69,4 +69,12 @@ var (
 	ErrWalletTopUpExpired         = errors.New("wallet top-up expired")
 	ErrInvalidWalletAmount        = errors.New("invalid wallet amount")
 	ErrUnsafePaymentResolution    = errors.New("unsafe payment resolution")
+
+	ErrDeliveryNotFound          = errors.New("delivery job not found")
+	ErrInvalidDeliveryState      = errors.New("invalid delivery state")
+	ErrDeliveryLeaseLost         = errors.New("delivery processing lease lost")
+	ErrDeliveryInventoryMismatch = errors.New("delivery inventory count mismatch")
+	ErrDeliveryMessageTooLarge   = errors.New("delivery message exceeds configured limit")
+	ErrDeliveryRequiresReview    = errors.New("delivery requires manual review")
+	ErrUnsafeDeliveryResolution  = errors.New("unsafe delivery resolution")
 )

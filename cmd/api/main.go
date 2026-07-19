@@ -99,8 +99,9 @@ func run(ctx context.Context) error {
 		store, bankCipher, vietQRGenerator, referenceGenerator,
 		domain.Money(cfg.WalletTopupMinAmount), domain.Money(cfg.WalletTopupMaxAmount),
 		cfg.WalletTopupExpiry, app.DefaultPostPaymentReservationTTL, walletMetrics,
-	)
-	paymentAdminService := app.NewPaymentAdminService(store, cfg.PaymentReviewPageSize, app.DefaultPostPaymentReservationTTL)
+	).WithDeliveryMaxAttempts(cfg.DeliveryMaxAttempts)
+	paymentAdminService := app.NewPaymentAdminService(store, cfg.PaymentReviewPageSize, app.DefaultPostPaymentReservationTTL).
+		WithDeliveryMaxAttempts(cfg.DeliveryMaxAttempts)
 	updateService := app.NewUpdateService(store, cfg.TelegramUpdateStaleAfter)
 	telegramClient, err := telegramadapter.NewClient(
 		cfg.TelegramBotToken, "", cfg.TelegramAPITimeout, 1<<20, telegramMetrics,

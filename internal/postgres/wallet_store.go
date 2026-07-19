@@ -96,7 +96,7 @@ func (s *AppStore) CreateWalletTopup(ctx context.Context, command app.CreateWall
 	return result, duplicate, err
 }
 
-func (s *AppStore) PayOrderWithWallet(ctx context.Context, command app.WalletOrderPaymentCommand, paidAt time.Time, reservationTTL time.Duration) (app.WalletOrderPaymentResult, error) {
+func (s *AppStore) PayOrderWithWallet(ctx context.Context, command app.WalletOrderPaymentCommand, paidAt time.Time, reservationTTL time.Duration, deliveryMaxAttempts ...int32) (app.WalletOrderPaymentResult, error) {
 	var result app.WalletOrderPaymentResult
 	err := s.transactor.WithinTransaction(ctx, func(ctx context.Context, queries *generated.Queries) error {
 		user, err := queries.LockUserByTelegramID(ctx, command.TelegramUserID)
@@ -200,6 +200,12 @@ func (s *AppStore) PayOrderWithWallet(ctx context.Context, command app.WalletOrd
 			}
 		}
 		if _, err := queries.InsertPaymentAllocation(ctx, generated.InsertPaymentAllocationParams{PaymentID: payment.ID, TargetType: "order", TargetID: order.ID, AmountVnd: order.TotalVnd}); err != nil {
+			return err
+		}
+		if _, err := createDeliveryHandoffWithinTransaction(
+			ctx, queries, order.ID, paidAt, configuredDeliveryMaxAttempts(deliveryMaxAttempts),
+			"user", user.ID, command.Meta.RequestID,
+		); err != nil {
 			return err
 		}
 		if err := completeReceipt(ctx, queries, command.Meta.UpdateID); err != nil {

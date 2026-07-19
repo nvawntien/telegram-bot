@@ -74,7 +74,7 @@ UPDATE payment_events
 SET processing_status = CASE WHEN attempts >= max_attempts THEN 'failed' ELSE 'received' END,
     next_attempt_at = sqlc.arg(next_attempt_at),
     processing_started_at = NULL,
-    processed_at = CASE WHEN attempts >= max_attempts THEN sqlc.arg(processed_at) ELSE NULL END,
+    processed_at = CASE WHEN attempts >= max_attempts THEN sqlc.arg(processed_at)::timestamptz ELSE NULL END,
     processing_error = sqlc.arg(processing_error),
     last_error_code = sqlc.arg(last_error_code)
 WHERE id = sqlc.arg(id) AND processing_status = 'processing'

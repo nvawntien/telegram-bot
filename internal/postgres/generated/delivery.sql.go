@@ -445,13 +445,13 @@ INSERT INTO outbox_events (
 ) VALUES (
     'order.delivery_requested',
     'order',
-    $1,
-    'delivery:order:' || $1::text,
+    $1::bigint,
+    'delivery:order:' || $1::bigint::text,
     jsonb_build_object('order_id', $1::bigint),
-    $2,
-    $3,
-    $1,
-    $4
+    $2::integer,
+    $3::timestamptz,
+    $1::bigint,
+    $4::bigint
 )
 ON CONFLICT (deduplication_key) DO NOTHING
 RETURNING id, event_type, aggregate_type, aggregate_id, deduplication_key, payload, status, attempts, max_attempts, next_attempt_at, locked_at, locked_by, last_error_code, last_error_detail, completed_at, created_at, updated_at, delivery_order_id, recipient_chat_id, processing_stage, send_attempted_at, telegram_message_id, telegram_sent_at, manual_resolution, resolution_reason, resolved_by_admin_id, resolved_at, version
@@ -461,7 +461,7 @@ type InsertDeliveryJobParams struct {
 	OrderID         int64              `db:"order_id" json:"order_id"`
 	MaxAttempts     int32              `db:"max_attempts" json:"max_attempts"`
 	NextAttemptAt   pgtype.Timestamptz `db:"next_attempt_at" json:"next_attempt_at"`
-	RecipientChatID pgtype.Int8        `db:"recipient_chat_id" json:"recipient_chat_id"`
+	RecipientChatID int64              `db:"recipient_chat_id" json:"recipient_chat_id"`
 }
 
 func (q *Queries) InsertDeliveryJob(ctx context.Context, arg InsertDeliveryJobParams) (OutboxEvent, error) {
@@ -1065,6 +1065,80 @@ func (q *Queries) ManualRetryDeliveryJob(ctx context.Context, arg ManualRetryDel
 		arg.ResolvedAt,
 		arg.ID,
 		arg.ExpectedVersion,
+	)
+	var i OutboxEvent
+	err := row.Scan(
+		&i.ID,
+		&i.EventType,
+		&i.AggregateType,
+		&i.AggregateID,
+		&i.DeduplicationKey,
+		&i.Payload,
+		&i.Status,
+		&i.Attempts,
+		&i.MaxAttempts,
+		&i.NextAttemptAt,
+		&i.LockedAt,
+		&i.LockedBy,
+		&i.LastErrorCode,
+		&i.LastErrorDetail,
+		&i.CompletedAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.DeliveryOrderID,
+		&i.RecipientChatID,
+		&i.ProcessingStage,
+		&i.SendAttemptedAt,
+		&i.TelegramMessageID,
+		&i.TelegramSentAt,
+		&i.ManualResolution,
+		&i.ResolutionReason,
+		&i.ResolvedByAdminID,
+		&i.ResolvedAt,
+		&i.Version,
+	)
+	return i, err
+}
+
+const markClaimedDeliveryFailure = `-- name: MarkClaimedDeliveryFailure :one
+UPDATE outbox_events
+SET status = $1,
+    processing_stage = NULL,
+    locked_at = NULL,
+    locked_by = NULL,
+    attempts = attempts + 1,
+    next_attempt_at = $2,
+    last_error_code = $3,
+    last_error_detail = $4,
+    completed_at = $5,
+    version = version + 1
+WHERE id = $6
+  AND status = 'processing'
+  AND processing_stage = 'claimed'
+  AND locked_by = $7
+  AND $1 IN ('retryable_failed', 'permanent_failed', 'manual_review')
+RETURNING id, event_type, aggregate_type, aggregate_id, deduplication_key, payload, status, attempts, max_attempts, next_attempt_at, locked_at, locked_by, last_error_code, last_error_detail, completed_at, created_at, updated_at, delivery_order_id, recipient_chat_id, processing_stage, send_attempted_at, telegram_message_id, telegram_sent_at, manual_resolution, resolution_reason, resolved_by_admin_id, resolved_at, version
+`
+
+type MarkClaimedDeliveryFailureParams struct {
+	NewStatus     string             `db:"new_status" json:"new_status"`
+	NextAttemptAt pgtype.Timestamptz `db:"next_attempt_at" json:"next_attempt_at"`
+	ErrorCode     pgtype.Text        `db:"error_code" json:"error_code"`
+	ErrorDetail   pgtype.Text        `db:"error_detail" json:"error_detail"`
+	CompletedAt   pgtype.Timestamptz `db:"completed_at" json:"completed_at"`
+	ID            int64              `db:"id" json:"id"`
+	WorkerID      pgtype.Text        `db:"worker_id" json:"worker_id"`
+}
+
+func (q *Queries) MarkClaimedDeliveryFailure(ctx context.Context, arg MarkClaimedDeliveryFailureParams) (OutboxEvent, error) {
+	row := q.db.QueryRow(ctx, markClaimedDeliveryFailure,
+		arg.NewStatus,
+		arg.NextAttemptAt,
+		arg.ErrorCode,
+		arg.ErrorDetail,
+		arg.CompletedAt,
+		arg.ID,
+		arg.WorkerID,
 	)
 	var i OutboxEvent
 	err := row.Scan(

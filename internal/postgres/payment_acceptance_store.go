@@ -14,15 +14,15 @@ import (
 	"github.com/nvawntien/telegram-bot/internal/postgres/generated"
 )
 
-func (s *AppStore) AcceptPayment(ctx context.Context, command app.AcceptPaymentCommand, acceptedAt time.Time, reservationTTL time.Duration) (app.PaymentAcceptanceResult, error) {
+func (s *AppStore) AcceptPayment(ctx context.Context, command app.AcceptPaymentCommand, acceptedAt time.Time, reservationTTL time.Duration, deliveryMaxAttempts ...int32) (app.PaymentAcceptanceResult, error) {
 	var result app.PaymentAcceptanceResult
 	err := s.transactor.WithinTransaction(ctx, func(ctx context.Context, queries *generated.Queries) error {
-		return acceptPaymentWithinTransaction(ctx, queries, command, acceptedAt, reservationTTL, &result)
+		return acceptPaymentWithinTransaction(ctx, queries, command, acceptedAt, reservationTTL, configuredDeliveryMaxAttempts(deliveryMaxAttempts), &result)
 	})
 	return result, err
 }
 
-func acceptPaymentWithinTransaction(ctx context.Context, queries *generated.Queries, command app.AcceptPaymentCommand, acceptedAt time.Time, reservationTTL time.Duration, result *app.PaymentAcceptanceResult) error {
+func acceptPaymentWithinTransaction(ctx context.Context, queries *generated.Queries, command app.AcceptPaymentCommand, acceptedAt time.Time, reservationTTL time.Duration, deliveryMaxAttempts int32, result *app.PaymentAcceptanceResult) error {
 	if command.PaymentEventID > 0 {
 		event, err := queries.LockPaymentEvent(ctx, command.PaymentEventID)
 		if err != nil {
@@ -140,6 +140,12 @@ func acceptPaymentWithinTransaction(ctx context.Context, queries *generated.Quer
 		return err
 	}
 	_ = allocation
+	if _, err := createDeliveryHandoffWithinTransaction(
+		ctx, queries, order.ID, acceptedAt, deliveryMaxAttempts,
+		command.Actor.Type, command.Actor.ID, command.RequestID,
+	); err != nil {
+		return err
+	}
 	result.Decision = "accepted"
 	result.Claimed = len(inventoryIDs)
 	if err := completePaymentEvent(ctx, queries, command.PaymentEventID, "completed", order.ID, 0, acceptedAt, "", ""); err != nil {

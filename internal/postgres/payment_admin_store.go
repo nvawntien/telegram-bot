@@ -12,7 +12,7 @@ import (
 	"github.com/nvawntien/telegram-bot/internal/postgres/generated"
 )
 
-func (s *AppStore) ManualAcceptPayment(ctx context.Context, manual app.ManualPaymentCommand, acceptedAt time.Time, reservationTTL time.Duration) (app.PaymentAcceptanceResult, error) {
+func (s *AppStore) ManualAcceptPayment(ctx context.Context, manual app.ManualPaymentCommand, acceptedAt time.Time, reservationTTL time.Duration, deliveryMaxAttempts ...int32) (app.PaymentAcceptanceResult, error) {
 	var result app.PaymentAcceptanceResult
 	err := s.transactor.WithinTransaction(ctx, func(ctx context.Context, queries *generated.Queries) error {
 		admin, err := authorizePaymentAdmin(ctx, queries, manual.AdminTelegramID)
@@ -28,7 +28,7 @@ func (s *AppStore) ManualAcceptPayment(ctx context.Context, manual app.ManualPay
 			OccurredAt: manual.OccurredAt, Actor: app.PaymentActor{Type: "admin", ID: admin.ID},
 			RequestID: manual.Meta.RequestID,
 		}
-		if err := acceptPaymentWithinTransaction(ctx, queries, command, acceptedAt, reservationTTL, &result); err != nil {
+		if err := acceptPaymentWithinTransaction(ctx, queries, command, acceptedAt, reservationTTL, configuredDeliveryMaxAttempts(deliveryMaxAttempts), &result); err != nil {
 			return err
 		}
 		note, _ := json.Marshal(map[string]any{"note": manual.Note, "decision": result.Decision, "reason": result.Reason})

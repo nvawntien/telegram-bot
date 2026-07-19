@@ -28,9 +28,10 @@ func TestPhase6ExactPaymentClaimsInventoryAtomically(t *testing.T) {
 
 	var status, eventStatus string
 	var claimed, paymentCount, allocationCount int
-	if err := database.pool.QueryRow(context.Background(), `SELECT status FROM orders WHERE id=$1`, order.ID).Scan(&status); err != nil || status != "reserving" {
+	if err := database.pool.QueryRow(context.Background(), `SELECT status FROM orders WHERE id=$1`, order.ID).Scan(&status); err != nil || status != "delivering" {
 		t.Fatalf("order status = %q, err=%v", status, err)
 	}
+	assertCount(t, database, `SELECT count(*) FROM outbox_events WHERE delivery_order_id=$1 AND event_type='order.delivery_requested'`, 1, order.ID)
 	if err := database.pool.QueryRow(context.Background(), `SELECT processing_status FROM payment_events WHERE external_event_id=$1`, "event-transaction-success").Scan(&eventStatus); err != nil || eventStatus != "completed" {
 		t.Fatalf("event status = %q, err=%v", eventStatus, err)
 	}

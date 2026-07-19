@@ -14,42 +14,52 @@ import (
 )
 
 const (
-	defaultHTTPAddr                       = ":8080"
-	defaultShutdownWindow                 = 10 * time.Second
-	defaultOrderExpiry                    = 15 * time.Minute
-	defaultRetryBase                      = 5 * time.Second
-	defaultWebhookBodyLimit         int64 = 1 << 20
-	defaultWebhookTimeout                 = 5 * time.Second
-	defaultUpdateStaleAfter               = 2 * time.Minute
-	defaultAdminSessionTTL                = 15 * time.Minute
-	defaultTelegramAPITimeout             = 5 * time.Second
-	defaultInventoryKeyVersion      int32 = 1
-	defaultInventoryImportMaxItems        = 100
-	defaultInventoryMaxItemBytes          = 4096
-	defaultInventoryMaxTotalBytes         = 256 * 1024
-	defaultBankKeyVersion           int32 = 1
-	defaultOrderMaxQuantity         int32 = 10
-	defaultOrderExpiryInterval            = 30 * time.Second
-	defaultOrderExpiryBatchSize     int32 = 100
-	defaultOrderExpiryRunTimeout          = 10 * time.Second
-	defaultPaymentReferencePrefix         = "TS"
-	defaultPaymentReferenceBytes          = 6
-	defaultVietQRBaseURL                  = "https://img.vietqr.io/image/"
-	defaultVietQRTemplate                 = "compact2"
-	defaultOrderPageSize                  = 8
-	defaultBankAccountPageSize            = 8
-	defaultPaymentEventBatchSize    int32 = 100
-	defaultPaymentEventPollInterval       = 5 * time.Second
-	defaultPaymentEventRunTimeout         = 10 * time.Second
-	defaultPaymentEventMaxAttempts  int32 = 5
-	defaultPaymentEventRetryBase          = 5 * time.Second
-	defaultPaymentStaleTimeout            = 2 * time.Minute
-	defaultSignedJSONTolerance            = 5 * time.Minute
-	defaultWalletTopupMin           int64 = 10_000
-	defaultWalletTopupMax           int64 = 10_000_000
-	defaultWalletTopupExpiry              = 15 * time.Minute
-	defaultWalletPageSize                 = 8
-	defaultPaymentReviewPageSize          = 8
+	defaultHTTPAddr                        = ":8080"
+	defaultShutdownWindow                  = 10 * time.Second
+	defaultOrderExpiry                     = 15 * time.Minute
+	defaultRetryBase                       = 5 * time.Second
+	defaultWebhookBodyLimit          int64 = 1 << 20
+	defaultWebhookTimeout                  = 5 * time.Second
+	defaultUpdateStaleAfter                = 2 * time.Minute
+	defaultAdminSessionTTL                 = 15 * time.Minute
+	defaultTelegramAPITimeout              = 5 * time.Second
+	defaultInventoryKeyVersion       int32 = 1
+	defaultInventoryImportMaxItems         = 100
+	defaultInventoryMaxItemBytes           = 4096
+	defaultInventoryMaxTotalBytes          = 256 * 1024
+	defaultBankKeyVersion            int32 = 1
+	defaultOrderMaxQuantity          int32 = 10
+	defaultOrderExpiryInterval             = 30 * time.Second
+	defaultOrderExpiryBatchSize      int32 = 100
+	defaultOrderExpiryRunTimeout           = 10 * time.Second
+	defaultPaymentReferencePrefix          = "TS"
+	defaultPaymentReferenceBytes           = 6
+	defaultVietQRBaseURL                   = "https://img.vietqr.io/image/"
+	defaultVietQRTemplate                  = "compact2"
+	defaultOrderPageSize                   = 8
+	defaultBankAccountPageSize             = 8
+	defaultPaymentEventBatchSize     int32 = 100
+	defaultPaymentEventPollInterval        = 5 * time.Second
+	defaultPaymentEventRunTimeout          = 10 * time.Second
+	defaultPaymentEventMaxAttempts   int32 = 5
+	defaultPaymentEventRetryBase           = 5 * time.Second
+	defaultPaymentStaleTimeout             = 2 * time.Minute
+	defaultSignedJSONTolerance             = 5 * time.Minute
+	defaultWalletTopupMin            int64 = 10_000
+	defaultWalletTopupMax            int64 = 10_000_000
+	defaultWalletTopupExpiry               = 15 * time.Minute
+	defaultWalletPageSize                  = 8
+	defaultPaymentReviewPageSize           = 8
+	defaultDeliveryBatchSize         int32 = 25
+	defaultDeliveryPollInterval            = 5 * time.Second
+	defaultDeliveryRunTimeout              = 30 * time.Second
+	defaultDeliveryJobTimeout              = 10 * time.Second
+	defaultDeliveryProcessingLease         = 2 * time.Minute
+	defaultDeliveryRetryMax                = 5 * time.Minute
+	defaultDeliveryRetryJitter             = 0.20
+	defaultDeliveryStaleScanInterval       = 30 * time.Second
+	defaultDeliveryMessageMaxBytes         = 3500
+	defaultDeliveryReviewPageSize          = 8
 )
 
 // Config is immutable after startup and is passed explicitly to process dependencies.
@@ -100,8 +110,18 @@ type Config struct {
 	WalletTopupExpiry             time.Duration
 	WalletPageSize                int
 	PaymentReviewPageSize         int
-	DeliveryMaxAttempts           int
+	DeliveryBatchSize             int32
+	DeliveryPollInterval          time.Duration
+	DeliveryRunTimeout            time.Duration
+	DeliveryJobTimeout            time.Duration
+	DeliveryProcessingLease       time.Duration
+	DeliveryMaxAttempts           int32
 	DeliveryRetryBase             time.Duration
+	DeliveryRetryMax              time.Duration
+	DeliveryRetryJitter           float64
+	DeliveryStaleScanInterval     time.Duration
+	DeliveryMessageMaxBytes       int
+	DeliveryReviewPageSize        int
 	LogLevel                      slog.Level
 	PrometheusEnabled             bool
 	ShutdownTimeout               time.Duration
@@ -178,8 +198,18 @@ func load(process processKind) (Config, error) {
 		WalletTopupExpiry:             defaultWalletTopupExpiry,
 		WalletPageSize:                defaultWalletPageSize,
 		PaymentReviewPageSize:         defaultPaymentReviewPageSize,
+		DeliveryBatchSize:             defaultDeliveryBatchSize,
+		DeliveryPollInterval:          defaultDeliveryPollInterval,
+		DeliveryRunTimeout:            defaultDeliveryRunTimeout,
+		DeliveryJobTimeout:            defaultDeliveryJobTimeout,
+		DeliveryProcessingLease:       defaultDeliveryProcessingLease,
 		DeliveryMaxAttempts:           5,
 		DeliveryRetryBase:             defaultRetryBase,
+		DeliveryRetryMax:              defaultDeliveryRetryMax,
+		DeliveryRetryJitter:           defaultDeliveryRetryJitter,
+		DeliveryStaleScanInterval:     defaultDeliveryStaleScanInterval,
+		DeliveryMessageMaxBytes:       defaultDeliveryMessageMaxBytes,
+		DeliveryReviewPageSize:        defaultDeliveryReviewPageSize,
 		LogLevel:                      slog.LevelInfo,
 		PrometheusEnabled:             true,
 		ShutdownTimeout:               defaultShutdownWindow,
@@ -190,8 +220,18 @@ func load(process processKind) (Config, error) {
 	}
 
 	var problems []error
-	assign(&problems, "DELIVERY_MAX_ATTEMPTS", parsePositiveInt(os.Getenv("DELIVERY_MAX_ATTEMPTS"), cfg.DeliveryMaxAttempts), &cfg.DeliveryMaxAttempts)
-	assign(&problems, "DELIVERY_RETRY_BASE_SECONDS", parsePositiveDuration(os.Getenv("DELIVERY_RETRY_BASE_SECONDS"), time.Second, cfg.DeliveryRetryBase), &cfg.DeliveryRetryBase)
+	assign(&problems, "DELIVERY_BATCH_SIZE", parsePositiveInt32(os.Getenv("DELIVERY_BATCH_SIZE"), cfg.DeliveryBatchSize), &cfg.DeliveryBatchSize)
+	assign(&problems, "DELIVERY_POLL_INTERVAL", parsePositiveDuration(os.Getenv("DELIVERY_POLL_INTERVAL"), time.Second, cfg.DeliveryPollInterval), &cfg.DeliveryPollInterval)
+	assign(&problems, "DELIVERY_RUN_TIMEOUT", parsePositiveDuration(os.Getenv("DELIVERY_RUN_TIMEOUT"), time.Second, cfg.DeliveryRunTimeout), &cfg.DeliveryRunTimeout)
+	assign(&problems, "DELIVERY_JOB_TIMEOUT", parsePositiveDuration(os.Getenv("DELIVERY_JOB_TIMEOUT"), time.Second, cfg.DeliveryJobTimeout), &cfg.DeliveryJobTimeout)
+	assign(&problems, "DELIVERY_PROCESSING_LEASE", parsePositiveDuration(os.Getenv("DELIVERY_PROCESSING_LEASE"), time.Second, cfg.DeliveryProcessingLease), &cfg.DeliveryProcessingLease)
+	assign(&problems, "DELIVERY_MAX_ATTEMPTS", parsePositiveInt32(os.Getenv("DELIVERY_MAX_ATTEMPTS"), cfg.DeliveryMaxAttempts), &cfg.DeliveryMaxAttempts)
+	assign(&problems, "DELIVERY_RETRY_BASE", parsePositiveDuration(os.Getenv("DELIVERY_RETRY_BASE"), time.Second, cfg.DeliveryRetryBase), &cfg.DeliveryRetryBase)
+	assign(&problems, "DELIVERY_RETRY_MAX", parsePositiveDuration(os.Getenv("DELIVERY_RETRY_MAX"), time.Second, cfg.DeliveryRetryMax), &cfg.DeliveryRetryMax)
+	assign(&problems, "DELIVERY_RETRY_JITTER", parseFloatRange(os.Getenv("DELIVERY_RETRY_JITTER"), cfg.DeliveryRetryJitter, 0, 1), &cfg.DeliveryRetryJitter)
+	assign(&problems, "DELIVERY_STALE_SCAN_INTERVAL", parsePositiveDuration(os.Getenv("DELIVERY_STALE_SCAN_INTERVAL"), time.Second, cfg.DeliveryStaleScanInterval), &cfg.DeliveryStaleScanInterval)
+	assign(&problems, "DELIVERY_MESSAGE_MAX_BYTES", parsePositiveInt(os.Getenv("DELIVERY_MESSAGE_MAX_BYTES"), cfg.DeliveryMessageMaxBytes), &cfg.DeliveryMessageMaxBytes)
+	assign(&problems, "DELIVERY_REVIEW_PAGE_SIZE", parsePositiveInt(os.Getenv("DELIVERY_REVIEW_PAGE_SIZE"), cfg.DeliveryReviewPageSize), &cfg.DeliveryReviewPageSize)
 	assign(&problems, "LOG_LEVEL", parseLogLevel(os.Getenv("LOG_LEVEL")), &cfg.LogLevel)
 	assign(&problems, "PROMETHEUS_ENABLED", parseBool(os.Getenv("PROMETHEUS_ENABLED"), cfg.PrometheusEnabled), &cfg.PrometheusEnabled)
 	assign(&problems, "SHUTDOWN_TIMEOUT_SECONDS", parsePositiveDuration(os.Getenv("SHUTDOWN_TIMEOUT_SECONDS"), time.Second, cfg.ShutdownTimeout), &cfg.ShutdownTimeout)
@@ -237,6 +277,9 @@ func load(process processKind) (Config, error) {
 		assign(&problems, "ADMIN_SESSION_TTL_MINUTES", parsePositiveDuration(os.Getenv("ADMIN_SESSION_TTL_MINUTES"), time.Minute, cfg.AdminSessionTTL), &cfg.AdminSessionTTL)
 		assign(&problems, "TELEGRAM_API_TIMEOUT_SECONDS", parsePositiveDuration(os.Getenv("TELEGRAM_API_TIMEOUT_SECONDS"), time.Second, cfg.TelegramAPITimeout), &cfg.TelegramAPITimeout)
 	} else {
+		assign(&problems, "TELEGRAM_API_TIMEOUT_SECONDS", parsePositiveDuration(os.Getenv("TELEGRAM_API_TIMEOUT_SECONDS"), time.Second, cfg.TelegramAPITimeout), &cfg.TelegramAPITimeout)
+		assign(&problems, "INVENTORY_ENCRYPTION_KEY", parseEncryptionKey(os.Getenv("INVENTORY_ENCRYPTION_KEY")), &cfg.InventoryEncryptionKey)
+		assign(&problems, "INVENTORY_ENCRYPTION_KEY_VERSION", parsePositiveInt32(os.Getenv("INVENTORY_ENCRYPTION_KEY_VERSION"), cfg.InventoryEncryptionKeyVersion), &cfg.InventoryEncryptionKeyVersion)
 		assign(&problems, "ORDER_EXPIRY_INTERVAL", parsePositiveDuration(os.Getenv("ORDER_EXPIRY_INTERVAL"), time.Second, cfg.OrderExpiryInterval), &cfg.OrderExpiryInterval)
 		assign(&problems, "ORDER_EXPIRY_BATCH_SIZE", parsePositiveInt32(os.Getenv("ORDER_EXPIRY_BATCH_SIZE"), cfg.OrderExpiryBatchSize), &cfg.OrderExpiryBatchSize)
 		assign(&problems, "ORDER_EXPIRY_RUN_TIMEOUT", parsePositiveDuration(os.Getenv("ORDER_EXPIRY_RUN_TIMEOUT"), time.Second, cfg.OrderExpiryRunTimeout), &cfg.OrderExpiryRunTimeout)
@@ -285,6 +328,8 @@ func validate(cfg Config, process processKind) []error {
 		required["TELEGRAM_BOT_TOKEN"] = cfg.TelegramBotToken
 		required["TELEGRAM_WEBHOOK_SECRET"] = cfg.TelegramWebhookSecret
 		required["TELEGRAM_WEBHOOK_URL"] = cfg.TelegramWebhookURL
+	} else {
+		required["TELEGRAM_BOT_TOKEN"] = cfg.TelegramBotToken
 	}
 	for name, value := range required {
 		if value == "" {
@@ -312,7 +357,7 @@ func validate(cfg Config, process processKind) []error {
 	if process == processAPI && (cfg.PaymentWebhookBodyLimit < 1024 || cfg.PaymentWebhookBodyLimit > 10<<20) {
 		problems = append(problems, errors.New("PAYMENT_WEBHOOK_BODY_LIMIT must be between 1024 and 10485760"))
 	}
-	if process == processAPI && (strings.TrimSpace(cfg.SupportContact) == "" || len([]rune(cfg.SupportContact)) > 200) {
+	if strings.TrimSpace(cfg.SupportContact) == "" || len([]rune(cfg.SupportContact)) > 200 {
 		problems = append(problems, errors.New("SUPPORT_CONTACT must contain 1 to 200 characters"))
 	}
 	if process == processAPI {
@@ -358,11 +403,25 @@ func validate(cfg Config, process processKind) []error {
 		if err != nil || vietQRURL.Scheme != "https" || vietQRURL.Host == "" || !validVietQRTemplate(cfg.VietQRTemplate) {
 			problems = append(problems, errors.New("VietQR configuration is invalid"))
 		}
-	} else if cfg.OrderExpiryBatchSize <= 0 || cfg.OrderExpiryBatchSize > 1000 {
-		problems = append(problems, errors.New("ORDER_EXPIRY_BATCH_SIZE must be between 1 and 1000"))
+	} else {
+		if cfg.OrderExpiryBatchSize <= 0 || cfg.OrderExpiryBatchSize > 1000 {
+			problems = append(problems, errors.New("ORDER_EXPIRY_BATCH_SIZE must be between 1 and 1000"))
+		}
+		if len(cfg.InventoryEncryptionKey) != 32 || cfg.InventoryEncryptionKeyVersion <= 0 {
+			problems = append(problems, errors.New("worker inventory encryption key configuration is invalid"))
+		}
 	}
 	if cfg.PaymentEventBatchSize <= 0 || cfg.PaymentEventBatchSize > 1000 || cfg.PaymentEventMaxAttempts <= 0 || cfg.PaymentEventMaxAttempts > 100 {
 		problems = append(problems, errors.New("payment event batch size or max attempts is outside its safe range"))
+	}
+	if cfg.DeliveryBatchSize <= 0 || cfg.DeliveryBatchSize > 100 || cfg.DeliveryMaxAttempts <= 0 || cfg.DeliveryMaxAttempts > 20 {
+		problems = append(problems, errors.New("delivery batch size or max attempts is outside its safe range"))
+	}
+	if cfg.DeliveryRetryBase > cfg.DeliveryRetryMax || cfg.DeliveryProcessingLease <= cfg.TelegramAPITimeout || cfg.DeliveryProcessingLease <= cfg.DeliveryJobTimeout {
+		problems = append(problems, errors.New("delivery retry or processing lease configuration is invalid"))
+	}
+	if cfg.DeliveryMessageMaxBytes < 512 || cfg.DeliveryMessageMaxBytes > 4096 || cfg.DeliveryReviewPageSize > 20 {
+		problems = append(problems, errors.New("delivery message limit or review page size is invalid"))
 	}
 	if cfg.DatabaseMinConnections > cfg.DatabaseMaxConnections {
 		problems = append(problems, errors.New("DATABASE_MIN_CONNECTIONS cannot exceed DATABASE_MAX_CONNECTIONS"))
@@ -497,6 +556,17 @@ func parsePositiveDuration(raw string, unit time.Duration, fallback time.Duratio
 		return parseResult[time.Duration]{err: result.err}
 	}
 	return parseResult[time.Duration]{value: time.Duration(result.value) * unit}
+}
+
+func parseFloatRange(raw string, fallback, minimum, maximum float64) parseResult[float64] {
+	if strings.TrimSpace(raw) == "" {
+		return parseResult[float64]{value: fallback}
+	}
+	value, err := strconv.ParseFloat(strings.TrimSpace(raw), 64)
+	if err != nil || value < minimum || value > maximum {
+		return parseResult[float64]{err: fmt.Errorf("must be between %.2f and %.2f", minimum, maximum)}
+	}
+	return parseResult[float64]{value: value}
 }
 
 func parseLogLevel(raw string) parseResult[slog.Level] {

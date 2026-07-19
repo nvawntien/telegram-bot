@@ -665,7 +665,7 @@ UPDATE payment_events
 SET processing_status = CASE WHEN attempts >= max_attempts THEN 'failed' ELSE 'received' END,
     next_attempt_at = $1,
     processing_started_at = NULL,
-    processed_at = CASE WHEN attempts >= max_attempts THEN $2 ELSE NULL END,
+    processed_at = CASE WHEN attempts >= max_attempts THEN $2::timestamptz ELSE NULL END,
     processing_error = $3,
     last_error_code = $4
 WHERE id = $5 AND processing_status = 'processing'

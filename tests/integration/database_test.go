@@ -221,6 +221,17 @@ func requirePostgresCode(t *testing.T, err error, code string) {
 	}
 }
 
+func assertCount(t *testing.T, database *testDatabase, query string, want int, args ...any) {
+	t.Helper()
+	var got int
+	if err := database.pool.QueryRow(context.Background(), query, args...).Scan(&got); err != nil {
+		t.Fatalf("query count: %v", err)
+	}
+	if got != want {
+		t.Fatalf("count = %d, want %d", got, want)
+	}
+}
+
 func withSearchPath(t *testing.T, baseURL, schema string) string {
 	t.Helper()
 	parsed, err := url.Parse(baseURL)

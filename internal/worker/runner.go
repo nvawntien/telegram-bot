@@ -29,19 +29,26 @@ type PaymentMetrics interface {
 	ObservePaymentEventProcessed(provider, result string, duration time.Duration)
 }
 
+type DeliveryJob interface {
+	RunOnce(context.Context) (int, error)
+}
+
 // Runner provides cancellation and dependency monitoring for future job loops.
 type Runner struct {
-	checker         DependencyChecker
-	logger          *slog.Logger
-	healthInterval  time.Duration
-	expiry          OrderExpiryJob
-	expiryInterval  time.Duration
-	runTimeout      time.Duration
-	metrics         ExpiryMetrics
-	payment         PaymentEventJob
-	paymentInterval time.Duration
-	paymentTimeout  time.Duration
-	paymentMetrics  PaymentMetrics
+	checker          DependencyChecker
+	logger           *slog.Logger
+	healthInterval   time.Duration
+	expiry           OrderExpiryJob
+	expiryInterval   time.Duration
+	runTimeout       time.Duration
+	metrics          ExpiryMetrics
+	payment          PaymentEventJob
+	paymentInterval  time.Duration
+	paymentTimeout   time.Duration
+	paymentMetrics   PaymentMetrics
+	delivery         DeliveryJob
+	deliveryInterval time.Duration
+	deliveryTimeout  time.Duration
 }
 
 func (r *Runner) WithPaymentEvents(job PaymentEventJob, interval, timeout time.Duration, metrics PaymentMetrics) *Runner {
@@ -49,6 +56,13 @@ func (r *Runner) WithPaymentEvents(job PaymentEventJob, interval, timeout time.D
 	r.paymentInterval = interval
 	r.paymentTimeout = timeout
 	r.paymentMetrics = metrics
+	return r
+}
+
+func (r *Runner) WithDelivery(job DeliveryJob, interval, timeout time.Duration) *Runner {
+	r.delivery = job
+	r.deliveryInterval = interval
+	r.deliveryTimeout = timeout
 	return r
 }
 
@@ -82,10 +96,18 @@ func (r *Runner) Run(ctx context.Context) error {
 		paymentChannel = paymentTicker.C
 		defer paymentTicker.Stop()
 	}
+	var deliveryTicker *time.Ticker
+	var deliveryChannel <-chan time.Time
+	if r.delivery != nil {
+		deliveryTicker = time.NewTicker(r.deliveryInterval)
+		deliveryChannel = deliveryTicker.C
+		defer deliveryTicker.Stop()
+	}
 	defer healthTicker.Stop()
 	defer expiryTicker.Stop()
 	r.runExpiry(ctx)
 	r.runPaymentEvents(ctx)
+	r.runDelivery(ctx)
 
 	for {
 		select {
@@ -100,8 +122,36 @@ func (r *Runner) Run(ctx context.Context) error {
 			r.runExpiry(ctx)
 		case <-paymentChannel:
 			r.runPaymentEvents(ctx)
+		case <-deliveryChannel:
+			r.runDelivery(ctx)
 		}
 	}
+}
+
+func (r *Runner) runDelivery(ctx context.Context) {
+	if r.delivery == nil {
+		return
+	}
+	started := time.Now()
+	defer func() {
+		if recover() != nil {
+			r.logger.ErrorContext(ctx, "delivery run panicked", "worker", "delivery", "result", "panic")
+		}
+	}()
+	runCtx, cancel := context.WithTimeout(ctx, r.deliveryTimeout)
+	defer cancel()
+	count, err := r.delivery.RunOnce(runCtx)
+	if err != nil {
+		r.logger.ErrorContext(ctx, "delivery run failed",
+			"worker", "delivery", "operation", "process_delivery_jobs",
+			"result", "failed", "duration_ms", time.Since(started).Milliseconds(), "error", err,
+		)
+		return
+	}
+	r.logger.InfoContext(ctx, "delivery run completed",
+		"worker", "delivery", "operation", "process_delivery_jobs",
+		"result", "success", "batch_size", count, "duration_ms", time.Since(started).Milliseconds(),
+	)
 }
 
 func (r *Runner) runPaymentEvents(ctx context.Context) {

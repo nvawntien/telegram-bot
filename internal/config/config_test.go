@@ -88,11 +88,31 @@ func TestLoadWorkerDoesNotRequireWebhookConfiguration(t *testing.T) {
 	t.Setenv("TELEGRAM_WEBHOOK_SECRET", "")
 	t.Setenv("TELEGRAM_WEBHOOK_URL", "")
 	t.Setenv("HTTP_ADDR", "")
-	t.Setenv("TELEGRAM_BOT_TOKEN", "")
 	t.Setenv("ADMIN_TELEGRAM_IDS", "")
-	t.Setenv("INVENTORY_ENCRYPTION_KEY", "")
 
 	if _, err := LoadWorker(); err != nil {
+		t.Fatalf("LoadWorker() error = %v", err)
+	}
+}
+
+func TestLoadWorkerRequiresDeliverySecrets(t *testing.T) {
+	setValidEnvironment(t)
+	t.Setenv("TELEGRAM_BOT_TOKEN", "")
+	t.Setenv("INVENTORY_ENCRYPTION_KEY", "")
+	_, err := LoadWorker()
+	if err == nil || !strings.Contains(err.Error(), "TELEGRAM_BOT_TOKEN") || !strings.Contains(err.Error(), "inventory encryption key") {
+		t.Fatalf("LoadWorker() error = %v", err)
+	}
+}
+
+func TestLoadValidatesDeliverySafetyBounds(t *testing.T) {
+	setValidEnvironment(t)
+	t.Setenv("DELIVERY_RETRY_BASE", "60")
+	t.Setenv("DELIVERY_RETRY_MAX", "10")
+	t.Setenv("DELIVERY_PROCESSING_LEASE", "3")
+	t.Setenv("DELIVERY_MESSAGE_MAX_BYTES", "5000")
+	_, err := LoadWorker()
+	if err == nil || !strings.Contains(err.Error(), "delivery retry or processing lease") || !strings.Contains(err.Error(), "delivery message limit") {
 		t.Fatalf("LoadWorker() error = %v", err)
 	}
 }

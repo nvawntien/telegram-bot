@@ -261,9 +261,10 @@ func TestPhase6TelegramWalletBalanceTopupAndOrderPaymentFlow(t *testing.T) {
 		t.Fatal(err)
 	}
 	var orderStatus string
-	if err := fixture.database.pool.QueryRow(ctx, `SELECT status FROM orders WHERE id=$1`, order.Order.ID).Scan(&orderStatus); err != nil || orderStatus != "reserving" {
+	if err := fixture.database.pool.QueryRow(ctx, `SELECT status FROM orders WHERE id=$1`, order.Order.ID).Scan(&orderStatus); err != nil || orderStatus != "delivering" {
 		t.Fatalf("order status=%s err=%v", orderStatus, err)
 	}
+	assertCount(t, fixture.database, `SELECT count(*) FROM outbox_events WHERE delivery_order_id=$1 AND event_type='order.delivery_requested'`, 1, order.Order.ID)
 	messenger.mu.Lock()
 	output, answers := messenger.output, messenger.answers
 	messenger.mu.Unlock()

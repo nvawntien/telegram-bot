@@ -40,7 +40,7 @@ type PaymentAcceptanceResult struct {
 }
 
 type PaymentAcceptanceRepository interface {
-	AcceptPayment(context.Context, AcceptPaymentCommand, time.Time, time.Duration) (PaymentAcceptanceResult, error)
+	AcceptPayment(context.Context, AcceptPaymentCommand, time.Time, time.Duration, ...int32) (PaymentAcceptanceResult, error)
 }
 
 type PaymentAcceptanceMetrics interface {
@@ -50,14 +50,22 @@ type PaymentAcceptanceMetrics interface {
 }
 
 type PaymentAcceptanceService struct {
-	repository     PaymentAcceptanceRepository
-	reservationTTL time.Duration
-	clock          func() time.Time
-	metrics        PaymentAcceptanceMetrics
+	repository          PaymentAcceptanceRepository
+	reservationTTL      time.Duration
+	clock               func() time.Time
+	metrics             PaymentAcceptanceMetrics
+	deliveryMaxAttempts int32
 }
 
 func NewPaymentAcceptanceService(repository PaymentAcceptanceRepository, reservationTTL time.Duration, metrics PaymentAcceptanceMetrics) *PaymentAcceptanceService {
-	return &PaymentAcceptanceService{repository: repository, reservationTTL: reservationTTL, clock: time.Now, metrics: metrics}
+	return &PaymentAcceptanceService{repository: repository, reservationTTL: reservationTTL, clock: time.Now, metrics: metrics, deliveryMaxAttempts: DefaultDeliveryMaxAttempts}
+}
+
+func (s *PaymentAcceptanceService) WithDeliveryMaxAttempts(maxAttempts int32) *PaymentAcceptanceService {
+	if maxAttempts > 0 {
+		s.deliveryMaxAttempts = maxAttempts
+	}
+	return s
 }
 
 func (s *PaymentAcceptanceService) Accept(ctx context.Context, command AcceptPaymentCommand) (PaymentAcceptanceResult, error) {
@@ -70,7 +78,7 @@ func (s *PaymentAcceptanceService) Accept(ctx context.Context, command AcceptPay
 		(command.Actor.Type != "provider" && command.Actor.Type != "admin") || s.reservationTTL <= 0 {
 		return PaymentAcceptanceResult{}, ErrInvalidInput
 	}
-	result, err := s.repository.AcceptPayment(ctx, command, s.clock(), s.reservationTTL)
+	result, err := s.repository.AcceptPayment(ctx, command, s.clock(), s.reservationTTL, s.deliveryMaxAttempts)
 	if err != nil {
 		return PaymentAcceptanceResult{}, fmt.Errorf("accept payment: %w", err)
 	}

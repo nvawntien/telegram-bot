@@ -71,7 +71,7 @@ type WalletAdjustmentCommand struct {
 type WalletRepository interface {
 	EnsureWallet(context.Context, int64) (WalletAccount, error)
 	CreateWalletTopup(context.Context, CreateWalletTopupCommand, string, time.Time) (WalletTopup, bool, error)
-	PayOrderWithWallet(context.Context, WalletOrderPaymentCommand, time.Time, time.Duration) (WalletOrderPaymentResult, error)
+	PayOrderWithWallet(context.Context, WalletOrderPaymentCommand, time.Time, time.Duration, ...int32) (WalletOrderPaymentResult, error)
 	AdjustWallet(context.Context, WalletAdjustmentCommand, time.Time) (WalletAccount, error)
 }
 
@@ -83,20 +83,28 @@ type WalletMetrics interface {
 }
 
 type WalletService struct {
-	repository     WalletRepository
-	cipher         BankAccountCipher
-	instructions   PaymentInstructionGenerator
-	references     PaymentReferenceGenerator
-	topupMin       domain.Money
-	topupMax       domain.Money
-	topupExpiry    time.Duration
-	reservationTTL time.Duration
-	clock          func() time.Time
-	metrics        WalletMetrics
+	repository          WalletRepository
+	cipher              BankAccountCipher
+	instructions        PaymentInstructionGenerator
+	references          PaymentReferenceGenerator
+	topupMin            domain.Money
+	topupMax            domain.Money
+	topupExpiry         time.Duration
+	reservationTTL      time.Duration
+	clock               func() time.Time
+	metrics             WalletMetrics
+	deliveryMaxAttempts int32
 }
 
 func NewWalletService(repository WalletRepository, cipher BankAccountCipher, instructions PaymentInstructionGenerator, references PaymentReferenceGenerator, topupMin, topupMax domain.Money, topupExpiry, reservationTTL time.Duration, metrics WalletMetrics) *WalletService {
-	return &WalletService{repository: repository, cipher: cipher, instructions: instructions, references: references, topupMin: topupMin, topupMax: topupMax, topupExpiry: topupExpiry, reservationTTL: reservationTTL, clock: time.Now, metrics: metrics}
+	return &WalletService{repository: repository, cipher: cipher, instructions: instructions, references: references, topupMin: topupMin, topupMax: topupMax, topupExpiry: topupExpiry, reservationTTL: reservationTTL, clock: time.Now, metrics: metrics, deliveryMaxAttempts: DefaultDeliveryMaxAttempts}
+}
+
+func (s *WalletService) WithDeliveryMaxAttempts(maxAttempts int32) *WalletService {
+	if maxAttempts > 0 {
+		s.deliveryMaxAttempts = maxAttempts
+	}
+	return s
 }
 
 func (s *WalletService) Balance(ctx context.Context, telegramUserID int64) (WalletAccount, error) {
@@ -149,7 +157,7 @@ func (s *WalletService) PayOrder(ctx context.Context, command WalletOrderPayment
 	if command.TelegramUserID <= 0 || command.OrderID <= 0 || command.IdempotencyKey == "" || command.Meta.UpdateID <= 0 || s.reservationTTL <= 0 {
 		return WalletOrderPaymentResult{}, ErrInvalidInput
 	}
-	result, err := s.repository.PayOrderWithWallet(ctx, command, s.clock(), s.reservationTTL)
+	result, err := s.repository.PayOrderWithWallet(ctx, command, s.clock(), s.reservationTTL, s.deliveryMaxAttempts)
 	if err != nil {
 		s.observePayment("failed")
 		return WalletOrderPaymentResult{}, fmt.Errorf("pay order with wallet: %w", err)

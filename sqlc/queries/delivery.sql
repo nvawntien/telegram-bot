@@ -36,13 +36,13 @@ INSERT INTO outbox_events (
 ) VALUES (
     'order.delivery_requested',
     'order',
-    sqlc.arg(order_id),
-    'delivery:order:' || sqlc.arg(order_id)::text,
+    sqlc.arg(order_id)::bigint,
+    'delivery:order:' || sqlc.arg(order_id)::bigint::text,
     jsonb_build_object('order_id', sqlc.arg(order_id)::bigint),
-    sqlc.arg(max_attempts),
-    sqlc.arg(next_attempt_at),
-    sqlc.arg(order_id),
-    sqlc.arg(recipient_chat_id)
+    sqlc.arg(max_attempts)::integer,
+    sqlc.arg(next_attempt_at)::timestamptz,
+    sqlc.arg(order_id)::bigint,
+    sqlc.arg(recipient_chat_id)::bigint
 )
 ON CONFLICT (deduplication_key) DO NOTHING
 RETURNING *;
@@ -267,6 +267,25 @@ WHERE id = sqlc.arg(id)
   AND status = 'processing'
   AND processing_stage = 'sending'
   AND locked_by = sqlc.arg(worker_id)
+RETURNING *;
+
+-- name: MarkClaimedDeliveryFailure :one
+UPDATE outbox_events
+SET status = sqlc.arg(new_status),
+    processing_stage = NULL,
+    locked_at = NULL,
+    locked_by = NULL,
+    attempts = attempts + 1,
+    next_attempt_at = sqlc.arg(next_attempt_at),
+    last_error_code = sqlc.arg(error_code),
+    last_error_detail = sqlc.arg(error_detail),
+    completed_at = sqlc.narg(completed_at),
+    version = version + 1
+WHERE id = sqlc.arg(id)
+  AND status = 'processing'
+  AND processing_stage = 'claimed'
+  AND locked_by = sqlc.arg(worker_id)
+  AND sqlc.arg(new_status) IN ('retryable_failed', 'permanent_failed', 'manual_review')
 RETURNING *;
 
 -- name: MarkDeliveryPermanentFailed :one

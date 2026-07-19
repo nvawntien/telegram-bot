@@ -50,23 +50,31 @@ type ResolvePaymentReviewCommand struct {
 }
 
 type PaymentAdminRepository interface {
-	ManualAcceptPayment(context.Context, ManualPaymentCommand, time.Time, time.Duration) (PaymentAcceptanceResult, error)
+	ManualAcceptPayment(context.Context, ManualPaymentCommand, time.Time, time.Duration, ...int32) (PaymentAcceptanceResult, error)
 	ListPaymentReviews(context.Context, int64, int32, int32) ([]PaymentReviewCase, int64, error)
 	ResolvePaymentReview(context.Context, ResolvePaymentReviewCommand) (PaymentReviewCase, error)
 }
 
 type PaymentAdminService struct {
-	repository     PaymentAdminRepository
-	pageSize       int
-	reservationTTL time.Duration
-	clock          func() time.Time
+	repository          PaymentAdminRepository
+	pageSize            int
+	reservationTTL      time.Duration
+	clock               func() time.Time
+	deliveryMaxAttempts int32
 }
 
 func NewPaymentAdminService(repository PaymentAdminRepository, pageSize int, reservationTTL time.Duration) *PaymentAdminService {
 	if pageSize <= 0 || pageSize > MaxPageSize {
 		pageSize = DefaultPageSize
 	}
-	return &PaymentAdminService{repository: repository, pageSize: pageSize, reservationTTL: reservationTTL, clock: time.Now}
+	return &PaymentAdminService{repository: repository, pageSize: pageSize, reservationTTL: reservationTTL, clock: time.Now, deliveryMaxAttempts: DefaultDeliveryMaxAttempts}
+}
+
+func (s *PaymentAdminService) WithDeliveryMaxAttempts(maxAttempts int32) *PaymentAdminService {
+	if maxAttempts > 0 {
+		s.deliveryMaxAttempts = maxAttempts
+	}
+	return s
 }
 
 func (s *PaymentAdminService) ManualConfirm(ctx context.Context, command ManualPaymentCommand) (PaymentAcceptanceResult, error) {
@@ -79,7 +87,7 @@ func (s *PaymentAdminService) ManualConfirm(ctx context.Context, command ManualP
 		command.OccurredAt.IsZero() || command.Meta.UpdateID <= 0 || s.reservationTTL <= 0 {
 		return PaymentAcceptanceResult{}, ErrInvalidInput
 	}
-	result, err := s.repository.ManualAcceptPayment(ctx, command, s.clock(), s.reservationTTL)
+	result, err := s.repository.ManualAcceptPayment(ctx, command, s.clock(), s.reservationTTL, s.deliveryMaxAttempts)
 	if err != nil {
 		return PaymentAcceptanceResult{}, fmt.Errorf("manual payment confirmation: %w", err)
 	}

@@ -132,6 +132,7 @@ type Querier interface {
 	LockWalletTopupByReference(ctx context.Context, paymentReference string) (WalletTopupIntent, error)
 	ManualCompleteDeliveryJob(ctx context.Context, arg ManualCompleteDeliveryJobParams) (OutboxEvent, error)
 	ManualRetryDeliveryJob(ctx context.Context, arg ManualRetryDeliveryJobParams) (OutboxEvent, error)
+	MarkClaimedDeliveryFailure(ctx context.Context, arg MarkClaimedDeliveryFailureParams) (OutboxEvent, error)
 	MarkDeliveryAmbiguous(ctx context.Context, arg MarkDeliveryAmbiguousParams) (OutboxEvent, error)
 	MarkDeliveryCompleted(ctx context.Context, arg MarkDeliveryCompletedParams) (OutboxEvent, error)
 	MarkDeliveryPermanentFailed(ctx context.Context, arg MarkDeliveryPermanentFailedParams) (OutboxEvent, error)
