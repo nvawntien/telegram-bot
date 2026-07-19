@@ -55,7 +55,28 @@ audit row, avoiding repeated audit noise; runtime authorization always reads
 
 Inventory sections are implemented in Phase 4. Ordering is Phase 5. Payment and
 wallet boundaries below are implemented in Phase 6. Delivery is implemented in
-Phase 7. Broadcast and Sheet sections remain later-phase targets.
+Phase 7. Provider ingestion/reconciliation is implemented in Phase 8A.
+Broadcast and Sheet sections remain later-phase targets.
+
+## Provider webhook and transaction API
+
+The Gin webhook reads one bounded raw body and calls an adapter before any write
+transaction. Verification/normalization completes first; generic ingestion then
+inserts the immutable event with uniqueness and conflict handling in a short
+database operation. Only durable insertion or an exact duplicate receives the
+adapter's validated acknowledgement.
+
+The reconciliation job claims a checkpoint lease in one short transaction,
+calls the provider API with no transaction open, ingests every page event, then
+advances cursor/version in another guarded transaction. A failure records only
+a bounded error code using a bounded cleanup context. Cursor state never moves
+ahead of durable ingestion.
+
+Provider-account creation/status changes reauthorize the active admin, verify a
+durable owned session and local bank environment, lock/version-guard the
+mapping, write masked audit data, finish the session, and complete the Telegram
+receipt in one transaction. Secrets are configuration-only and cannot be
+entered through Telegram.
 
 ## Create order
 

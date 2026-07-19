@@ -6,7 +6,7 @@ as a Go modular monolith. The reference repository defines the Telegram product
 experience; this repository redesigns persistence, transactions, concurrency,
 idempotency, auditability, and recovery around PostgreSQL.
 
-Current status: **Phase 7 transactional Telegram delivery complete**. The API
+Current status: **Phase 8A provider-neutral automatic payment infrastructure complete**. The API
 accepts secret-verified Telegram webhooks through Gin, durably deduplicates
 updates, serves the active catalog, and provides PostgreSQL-backed, audited
 category/product and redacted inventory administration. Authenticated
@@ -18,7 +18,11 @@ ingestion, exact reconciliation, manual confirmation, atomic post-payment
 inventory claims, review cases, wallet top-ups, and wallet order payment. Phase
 7 adds a durable delivery outbox, boundary-only inventory decryption, Telegram
 delivery, bounded retry/backoff, conservative ambiguous-send recovery, and
-audited admin resolution. Bank-refund execution, broadcast, and Google Sheet
+audited admin resolution. Phase 8A adds capability-based provider adapters,
+generic webhook ingestion, durable transaction-API reconciliation, explicit
+provider-account mapping, strict reference extraction, environment isolation,
+provider health, and automatic order/top-up acceptance. No concrete production
+provider adapter is bundled; bank-refund execution, broadcast, and Google Sheet
 workflows remain disabled.
 
 ## Architecture
@@ -45,6 +49,12 @@ POST /webhooks/payments/:provider -> verify raw-body signature -> payment_events
 payment worker -> shared acceptance core -> payment/order/wallet/inventory transaction
 delivery worker -> claim lease -> decrypt in memory -> Telegram -> finalize transaction
 ```
+
+Providers may implement webhook only, transaction API only, or both. When
+webhooks are available they are the real-time path; the transaction API is a
+checkpointed recovery/reconciliation path. Both normalize into the same durable
+event ingestion service and neither adapter may update an order, wallet,
+inventory, or delivery row directly.
 
 External APIs are never called inside a database transaction. See the
 [architecture ADR](docs/adr/0001-modular-monolith-and-durable-workers.md) and
@@ -208,6 +218,10 @@ jobs with redacted attempt evidence and reconciliation counts. Ambiguous sends
 never retry automatically. Retry or mark-delivered resolution requires an
 active PostgreSQL admin, a durable versioned session, mandatory reason/evidence,
 and explicit confirmation; Telegram is still called only by the worker.
+The payment-provider menu shows bounded capability/health data and redacted
+account mappings. Linking or toggling a mapping requires an active PostgreSQL
+admin, a durable owned session, explicit confirmation, an optimistic version
+guard, an audit row, and an idempotent Telegram update receipt in one transaction.
 
 Banned/disabled users are denied. Unknown commands get a short menu hint.
 VietQR output is only a transfer instruction. Opening the QR does not confirm a
@@ -224,7 +238,7 @@ refund API, or automatic compatibility with a real bank provider.
 | `GET` | `/health/ready` | Executes a bounded sqlc PostgreSQL health query. |
 | `GET` | `/metrics` | Prometheus HTTP counters and duration histograms. |
 | `POST` | `/webhooks/telegram` | Bounded, secret-verified Telegram update receiver. |
-| `POST` | `/webhooks/payments/:provider` | Allowlisted, signed, durable payment-event ingestion. |
+| `POST` | `/webhooks/payments/:provider` | Capability-checked provider webhook with provider-specific acknowledgement and durable generic ingestion. |
 
 The server sets/request-propagates `X-Request-ID`, uses structured access logs,
 recovers request panics, bounds headers and HTTP timeouts, and drains on
@@ -275,19 +289,38 @@ delivery; it does not require webhook/admin/VietQR or bank-account secrets. The
 migration process requires only `DATABASE_URL` and an optional
 `MIGRATIONS_DIR`.
 
-Payment settings are `PAYMENT_ALLOWED_PROVIDERS`, `PAYMENT_WEBHOOK_BODY_LIMIT`,
-the `PAYMENT_EVENT_*` worker controls, `PAYMENT_STALE_PROCESSING_TIMEOUT`, and
-wallet/top-up limits in `.env.example`. The only included webhook adapter is
-`signed_json`: HMAC-SHA-256 over the raw body plus a signed timestamp checked
-within `SIGNED_JSON_TIMESTAMP_TOLERANCE`. It is disabled unless explicitly
-allowlisted and requires `SIGNED_JSON_WEBHOOK_SECRET` when enabled. It is a
-development/private-integration contract and is not compatible by default with
-Sepay, Casso, PayOS, or any bank API.
+Payment provider settings are `PAYMENT_PROVIDERS`, `PAYMENT_PRIMARY_PROVIDER`,
+`PAYMENT_PROVIDER_ENVIRONMENT`, `PAYMENT_RECONCILIATION_ENABLED`,
+`PAYMENT_RECONCILIATION_INTERVAL`, `PAYMENT_RECONCILIATION_RUN_TIMEOUT`,
+`PAYMENT_RECONCILIATION_REQUEST_TIMEOUT`, `PAYMENT_RECONCILIATION_MAX_PAGES`,
+`PAYMENT_RECONCILIATION_PAGE_SIZE`, and `PAYMENT_PROVIDER_REVIEW_PAGE_SIZE`.
+The `PAYMENT_EVENT_*`, webhook body, stale processing, and wallet/top-up controls
+remain documented in `.env.example`.
+
+The only bundled webhook adapter is `signed_json`: HMAC-SHA-256 over the raw
+body plus a signed timestamp checked within `SIGNED_JSON_TIMESTAMP_TOLERANCE`.
+It is disabled unless explicitly registered, requires
+`SIGNED_JSON_WEBHOOK_SECRET`, and startup rejects it in the production provider
+environment. It is a development/private-integration contract, not a production
+bank provider. No SePay or RPay contract is hardcoded or claimed. Add a selected
+production provider only from its official authentication, payload,
+acknowledgement, pagination, rate-limit, and retry documentation.
 
 Webhook ACK is `202 Accepted` only after durable insertion. Exact duplicates
 also receive `202`; conflicting event IDs receive `409`; signature/replay
 failures receive `401`. Inspect payment review cases through `/admin`. Run the
 worker continuously to process received events.
+
+To add a provider, follow the
+[provider adapter runbook](docs/runbooks/add-payment-provider.md), implement only
+the capabilities its official contract supports, add adapter contract tests,
+register the validated adapter at the API/worker composition roots, create a
+same-environment local bank account, and link its exact destination identity in
+the Telegram provider administration menu. Provider health shows last webhook,
+reconciliation attempt/success, redacted error code, checkpoint transaction
+time, pending events, reviews, and active mapping count. Reconciliation is
+bounded by timeout/page settings and runs only when enabled; a missed webhook is
+recoverable only for providers with the reconciliation capability.
 
 Back up PostgreSQL with authenticated access controls appropriate to the
 deployment. A backup contains ciphertext rather than plaintext inventory, but
@@ -305,6 +338,10 @@ without the matching key cannot recover inventory.
 - [Payment ingestion and acceptance](docs/design/payment-ingestion.md)
 - [Wallet ledger](docs/design/wallet-ledger.md)
 - [Payment reconciliation](docs/design/payment-reconciliation.md)
+- [Payment provider adapters](docs/design/payment-provider-adapters.md)
+- [Provider capabilities](docs/design/provider-capabilities.md)
+- [Automatic bank confirmation](docs/design/automatic-bank-confirmation.md)
+- [Payment acceptance invariants](docs/design/payment-acceptance.md)
 - [Delivery outbox](docs/design/delivery-outbox.md)
 - [Delivery state machine](docs/design/delivery-state-machine.md)
 - [Ambiguous Telegram delivery](docs/design/ambiguous-telegram-delivery.md)
@@ -323,6 +360,13 @@ without the matching key cannot recover inventory.
 - [Phase 5 completion report](docs/phase-5-report.md)
 - [Phase 6 completion report](docs/phase-6-report.md)
 - [Phase 7 completion report](docs/phase-7-report.md)
+- [Phase 8A completion report](docs/phase-8a-report.md)
+
+Operational runbooks:
+
+- [Add a payment provider](docs/runbooks/add-payment-provider.md)
+- [Recover provider webhooks](docs/runbooks/provider-webhook-recovery.md)
+- [Run payment reconciliation](docs/runbooks/payment-reconciliation.md)
 
 ## Repository layout
 
@@ -348,6 +392,13 @@ The fuller phase-by-phase layout is in the architecture document. Packages are
 created when they gain working behaviour, not as empty skeletons.
 
 ## Current limitations
+
+- Provider-neutral infrastructure is complete, but a concrete production
+  provider adapter remains deferred until official provider documentation is
+  supplied. The bundled `signed_json` adapter cannot run in production.
+- A webhook-only provider cannot recover a webhook the provider never retries;
+  an API-only provider has polling-interval latency. Combined capability is the
+  recommended operational shape when the selected provider supports it.
 
 - Delivery uses one bounded Telegram message. Oversized opaque inventory fails
   before send and enters review; it is never truncated or partially sent.

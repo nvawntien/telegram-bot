@@ -85,7 +85,24 @@ backfill idempotently; retries are bounded; ambiguous outcomes never auto-retry;
 confirmed success alone sells exact inventory and marks delivered; 100 workers
 claim one job once; crash boundaries and plaintext leakage are tested.
 
-### Phase 8 — operations
+### Phase 8A — automatic provider payments (implemented)
+
+1. Capability-based immutable provider registry and test/private signed webhook.
+2. Generic Gin webhook, normalized durable events, strict references, and exact
+   same-environment destination mappings.
+3. Optional leased transaction-API reconciliation with opaque checkpoints and
+   missed-webhook recovery.
+4. Automatic order/wallet acceptance through the existing transaction core,
+   provider health, mapping administration, metrics, and concurrency tests.
+
+Exit achieved: webhook-only, API-only, and combined fake providers are covered;
+webhook/API convergence has one effect; missed webhook recovery advances only
+after ingestion; production/test isolation, 100-request deduplication, wallet
+single credit, exact inventory/delivery handoff, and migration rollback are
+proved. A concrete production adapter remains deferred until official provider
+documentation is supplied.
+
+### Phase 8B — operations
 
 1. Broadcast recipients/rate limiter/retry-after/resume/cancel.
 2. Sheet adapter/run history/per-row validation/idempotent inventory import.
@@ -99,6 +116,8 @@ Exit: remaining Definition of Done checks and restore drill pass.
 | Risk | Impact | Control / proof |
 |---|---|---|
 | Payment webhook semantics are provider-specific and currently unspecified | False credit or replay | Provider fixture contract, HMAC/signature verification, unique event and transaction IDs, exact amount/reference checks |
+| Provider account is mapped incorrectly | Payment applied to wrong receiving account | Explicit exact identity, same environment, active mapping, optimistic version, confirmation, masked audit |
+| Reconciliation skips a page after failure | Missing payment evidence | Leased durable cursor advances only after all page events are durably ingested; duplicate reread is safe |
 | Telegram Bot API has rate limits and ambiguous timeout outcomes | Duplicate or missing delivery | Durable attempts, idempotent completion, retry-after support, manual recovery view; never mark delivered before success |
 | Digital goods are high-value secrets | Credential disclosure | AES-256-GCM, separate HMAC fingerprint key, key IDs/rotation, redacted logs/audit, least-privilege DB access |
 | `SKIP LOCKED` code looks correct but fails under real contention | Oversell | PostgreSQL integration tests with 100 goroutines and multiple concurrent orders; partial unique active-mapping constraint |
@@ -118,7 +137,7 @@ Exit: remaining Definition of Done checks and restore drill pass.
 These do not block Phase 1 and should be resolved from provider/business facts,
 not guessed in infrastructure code:
 
-- first production automatic payment provider and its official webhook contract;
+- first production automatic payment provider and its official webhook/API contract;
 - exact admin role-to-permission matrix;
 - refund execution mechanism and settlement SLA;
 - Telegram ambiguous-send policy acceptable to the operator;

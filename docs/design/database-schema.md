@@ -1,6 +1,6 @@
 # Implemented PostgreSQL schema
 
-The implemented schema spans goose migrations `00001` through `00018`.
+The implemented schema spans goose migrations `00001` through `00022`.
 Business rows use `bigint GENERATED ALWAYS AS IDENTITY`; Telegram identifiers
 remain external `bigint` values. This keeps joins and queue indexes compact while
 supporting Telegram's signed 64-bit identifier range.
@@ -45,6 +45,10 @@ supporting Telegram's signed 64-bit identifier range.
 | `00016_orders_banks_vietqr` | encrypted bank envelope metadata and immutable order bank snapshots |
 | `00017_payments_wallet_phase6` | durable payment processing, allocations, reviews, and wallet top-up intents |
 | `00018_transactional_delivery_phase7` | delivery leases, ambiguity/manual state, Telegram evidence, append-only attempts, and review indexes |
+| `00019_payment_provider_automation` | provider environments, account mappings, reconciliation checkpoints, normalized event evidence, and provider review metadata |
+| `00020_bank_account_payment_environment` | same-environment bank-account selection and lookup index |
+| `00021_payment_checkpoint_time_order` | removes an invalid ordering assumption between independent checkpoint attempt and success timestamps |
+| `00022_payment_checkpoint_down_compatibility` | data-guarded rollback compatibility for the migration 21 constraint transition |
 
 Each file has a dependency-safe `Down` section. Integration tests prove the
 full `up -> down-to-zero -> up` cycle in an isolated schema.
@@ -119,30 +123,35 @@ history and uses `ON DELETE RESTRICT`.
 
 `bank_accounts` stores safe display metadata plus AES-256-GCM ciphertext, nonce,
 format, positive key version, operational key ID, keyed 32-byte fingerprint,
-last four digits, active flag, sort order, and optimistic version. Account
+last four digits, typed payment environment, active flag, sort order, and optimistic version. Account
 numbers are never stored in plaintext or audit JSON. Active customer options
-return redacted metadata only.
+return redacted metadata only and are filtered to the order/top-up environment.
 
 ## Payments and wallet
 
 `payments` supports order, wallet top-up, and refund purposes. Amounts are
-positive VND. A partial unique index on `(provider, provider_transaction_id)`
+positive VND. A partial unique index on
+`(provider,payment_environment,provider_transaction_id)`
 prevents one provider transfer from being applied twice. Multiple genuine
 transfers may share an order reference; only one may win the unique target
 allocation. Confirmed payments require `confirmed_at`, and `occurred_at`
 preserves provider/manual evidence time.
 
-`payment_events` uses unique `(provider, external_event_id)` as its replay
-guard. It stores a 32-byte payload hash, sanitized JSON object, attempts,
-next-attempt time, processing lease timestamps, related target, and constrained
+`payment_events` uses unique `(provider,external_event_id)` as its replay guard
+and environment-scoped transaction uniqueness as a second boundary. It stores
+a 32-byte payload hash and business fingerprint, sanitized JSON object, typed
+environment/source/direction, bounded transfer content, destination/provider
+account identity, resolved mapping, attempts, next-attempt time, processing
+lease timestamps, related target, and constrained
 `received/processing/completed/review/failed` state. No webhook secret,
-signature, or raw sensitive payload is stored.
+signature, API token, or raw sensitive payload is stored.
 
 `payment_allocations` is append-only and gives each accepted payment exactly
 one `order` or `wallet_topup` target while a target unique constraint prevents
 double settlement. `payment_review_cases` durably retains unmatched, mismatch,
 late, cancelled, competing, transaction-conflict, expired-top-up, and
-post-payment out-of-stock evidence with audited operator resolution.
+post-payment out-of-stock evidence with provider environment/source/mapping and
+audited operator resolution.
 
 `wallet_accounts` has one non-negative materialized balance per user. The
 append-only ledger remains the audit source. Ledger idempotency is scoped to
@@ -150,8 +159,25 @@ append-only ledger remains the audit source. Ledger idempotency is scoped to
 external key without collision.
 
 `wallet_topup_intents` has unique payment reference and per-user idempotency,
-bounded positive VND amount, expiry/version, status, and an immutable encrypted
+bounded positive VND amount, typed payment environment, expiry/version, status, and an immutable encrypted
 bank instruction snapshot. No ledger credit exists before exact payment acceptance.
+
+## Payment provider automation
+
+`payment_provider_accounts` explicitly maps one validated provider/environment
+destination identity to one same-environment local bank account. Full identity
+is retained only for exact matching; admin views and audit snapshots are masked.
+Unique raw identity/fingerprint constraints, a partial active bank mapping
+constraint, active/inactive status, optimistic version, restricted bank foreign
+key, and no hard-delete application path protect the mapping.
+
+`payment_provider_checkpoints` has one row per provider mapping, opaque cursor,
+last transaction/time, last attempt/success, bounded error code, lease
+owner/expiry, and optimistic version. Page ingestion precedes guarded cursor
+advance. A crash therefore rereads a page and relies on event/transaction
+idempotency instead of losing evidence. Migration 22 makes the empty-schema
+rollback sequence safe without weakening the data guard for populated
+checkpoints.
 
 ## Durable work and operations
 

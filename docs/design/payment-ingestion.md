@@ -2,11 +2,17 @@
 
 ## Provider boundary
 
-`internal/payment.WebhookVerifier` verifies provider transport details and emits
-one transport-neutral event. The repository currently ships only `signed_json`,
-a controlled private/test contract. It does not claim compatibility with any
-bank or payment company and is disabled unless `PAYMENT_ALLOWED_PROVIDERS`
-contains `signed_json`.
+`internal/payment.Registry` exposes typed webhook and transaction-API lookups
+from immutable startup registration. Each adapter declares its name,
+environment, enabled state, and webhook/reconciliation/test capabilities. An
+adapter implements only supported capabilities and emits one provider-neutral
+event; provider DTOs never cross into the application core.
+
+The repository currently ships only `signed_json`, a webhook-only controlled
+private/test contract. It is disabled unless `PAYMENT_PROVIDERS` contains
+`signed_json`, requires a dedicated secret, and is rejected in the production
+provider environment. It does not claim compatibility with a bank or payment
+company.
 
 The contract requires JSON fields `event_id`, `transaction_id`,
 `payment.received`, exact `reference`, positive integer `amount_vnd`, `VND`, a
@@ -18,12 +24,14 @@ body, so changing either representation invalidates the request.
 
 ## HTTP acknowledgement
 
-`POST /webhooks/payments/:provider` accepts only an allowlisted provider and
-`application/json`, bounds the raw body, verifies before normalization, and
-stores the event before responding. It never logs raw body, signature, secret,
-or full account identifier.
+`POST /webhooks/payments/:provider` validates the provider name, performs a typed
+enabled webhook-capability lookup, bounds and preserves the raw body, delegates
+verification/parsing, and stores the event before returning the adapter's
+validated static acknowledgement. The generic Gin handler contains no provider
+DTO switch, SQLC, order, wallet, inventory, or delivery logic. It never logs raw
+body, signature, secret, or full account identifier.
 
-- new or exact duplicate durable event: `202 Accepted`;
+- `signed_json` new or exact duplicate durable event: `202 Accepted`;
 - unknown provider: `404`;
 - bad signature or replay timestamp: `401`;
 - malformed normalized event: `400`;
@@ -34,15 +42,19 @@ or full account identifier.
 
 The worker claims `received` events and stale `processing` leases with ordered
 `FOR UPDATE SKIP LOCKED`, bounded batch/run time, attempts, exponential backoff,
-and a max-attempt terminal state. Business decisions are non-retryable:
+and a max-attempt terminal state. Outbound transactions are retained and
+completed as ignored. For inbound rows, the worker uses strict finite reference
+extraction and exact active provider/environment destination mapping before
+entering the existing acceptance service. Business decisions are non-retryable:
 unknown reference, amount/currency mismatch, late/cancelled target, competing
 payment, transaction conflict, expired top-up, and post-payment stock shortage
 become durable review cases.
 
 Exact pending-order payment locks the event/order, inserts the unique payment,
 records `pending_payment -> paid -> reserving`, claims an exact inventory set,
-adds mappings/allocation/audit, completes the event, and commits once. It stops
-at `reserving`; no inventory is decrypted and no delivery outbox is created.
+adds mappings/allocation/audit, creates the unique delivery job, transitions to
+`delivering`, completes the event, and commits once. No inventory is decrypted
+and no Telegram request occurs in that transaction.
 
 If real external money was received but stock is short, the exact-set query
 updates zero inventory rows. The transaction preserves a confirmed payment,
