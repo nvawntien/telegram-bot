@@ -13,22 +13,25 @@ import (
 )
 
 const (
-	SessionCategoryCreate   = "category.create"
-	SessionCategoryEdit     = "category.edit"
-	SessionCategoryToggle   = "category.toggle"
-	SessionProductCreate    = "product.create"
-	SessionProductEdit      = "product.edit"
-	SessionProductToggle    = "product.toggle"
-	SessionInventoryImport  = "inventory.import"
-	SessionInventoryToggle  = "inventory.toggle"
-	SessionBankCreate       = "bank.create"
-	SessionBankEdit         = "bank.edit"
-	SessionBankToggle       = "bank.toggle"
-	SessionPaymentManual    = "payment.manual"
-	SessionPaymentReview    = "payment.review"
-	SessionWalletAdjustment = "wallet.adjustment"
-	SessionDeliveryRetry    = "delivery.retry"
-	SessionDeliveryComplete = "delivery.complete"
+	SessionCategoryCreate         = "category.create"
+	SessionCategoryEdit           = "category.edit"
+	SessionCategoryToggle         = "category.toggle"
+	SessionProductCreate          = "product.create"
+	SessionProductEdit            = "product.edit"
+	SessionProductToggle          = "product.toggle"
+	SessionInventoryImport        = "inventory.import"
+	SessionInventoryToggle        = "inventory.toggle"
+	SessionBankCreate             = "bank.create"
+	SessionBankEdit               = "bank.edit"
+	SessionBankToggle             = "bank.toggle"
+	SessionPaymentManual          = "payment.manual"
+	SessionPaymentReview          = "payment.review"
+	SessionWalletAdjustment       = "wallet.adjustment"
+	SessionDeliveryRetry          = "delivery.retry"
+	SessionDeliveryComplete       = "delivery.complete"
+	SessionProviderAccountCreate  = "provider.account.create"
+	SessionProviderAccountToggle  = "provider.account.toggle"
+	SessionProviderReconciliation = "provider.reconciliation"
 )
 
 type AdminRepository interface {
@@ -327,7 +330,8 @@ func validSessionState(state string) bool {
 		SessionInventoryImport, SessionInventoryToggle,
 		SessionBankCreate, SessionBankEdit, SessionBankToggle,
 		SessionPaymentManual, SessionPaymentReview, SessionWalletAdjustment,
-		SessionDeliveryRetry, SessionDeliveryComplete:
+		SessionDeliveryRetry, SessionDeliveryComplete,
+		SessionProviderAccountCreate, SessionProviderAccountToggle, SessionProviderReconciliation:
 		return true
 	default:
 		return false

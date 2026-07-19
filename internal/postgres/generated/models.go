@@ -61,6 +61,7 @@ type BankAccount struct {
 	EncryptionFormat         string             `db:"encryption_format" json:"encryption_format"`
 	EncryptionKeyVersion     int32              `db:"encryption_key_version" json:"encryption_key_version"`
 	Version                  int64              `db:"version" json:"version"`
+	PaymentEnvironment       string             `db:"payment_environment" json:"payment_environment"`
 }
 
 type Broadcast struct {

@@ -16,14 +16,11 @@ UPDATE payment_provider_checkpoints
 SET cursor_value = $1,
     last_transaction_external_id = $2,
     last_occurred_at = $3,
-    last_successful_at = $4,
     last_error_code = NULL,
-    lease_owner = NULL,
-    lease_expires_at = NULL,
     version = version + 1
-WHERE id = $5
-  AND version = $6
-  AND lease_owner = $7
+WHERE id = $4
+  AND version = $5
+  AND lease_owner = $6
 RETURNING id, provider_account_id, cursor_value, last_transaction_external_id, last_occurred_at, last_attempted_at, last_successful_at, last_error_code, lease_owner, lease_expires_at, version, created_at, updated_at
 `
 
@@ -31,7 +28,6 @@ type AdvancePaymentProviderCheckpointParams struct {
 	CursorValue               pgtype.Text        `db:"cursor_value" json:"cursor_value"`
 	LastTransactionExternalID pgtype.Text        `db:"last_transaction_external_id" json:"last_transaction_external_id"`
 	LastOccurredAt            pgtype.Timestamptz `db:"last_occurred_at" json:"last_occurred_at"`
-	CompletedAt               pgtype.Timestamptz `db:"completed_at" json:"completed_at"`
 	ID                        int64              `db:"id" json:"id"`
 	ExpectedVersion           int64              `db:"expected_version" json:"expected_version"`
 	ExpectedLeaseOwner        pgtype.Text        `db:"expected_lease_owner" json:"expected_lease_owner"`
@@ -42,7 +38,6 @@ func (q *Queries) AdvancePaymentProviderCheckpoint(ctx context.Context, arg Adva
 		arg.CursorValue,
 		arg.LastTransactionExternalID,
 		arg.LastOccurredAt,
-		arg.CompletedAt,
 		arg.ID,
 		arg.ExpectedVersion,
 		arg.ExpectedLeaseOwner,
@@ -142,6 +137,52 @@ func (q *Queries) ClaimPaymentProviderCheckpoint(ctx context.Context, arg ClaimP
 		arg.LeaseExpiresAt,
 		arg.AttemptedAt,
 		arg.ID,
+	)
+	var i PaymentProviderCheckpoint
+	err := row.Scan(
+		&i.ID,
+		&i.ProviderAccountID,
+		&i.CursorValue,
+		&i.LastTransactionExternalID,
+		&i.LastOccurredAt,
+		&i.LastAttemptedAt,
+		&i.LastSuccessfulAt,
+		&i.LastErrorCode,
+		&i.LeaseOwner,
+		&i.LeaseExpiresAt,
+		&i.Version,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const completePaymentProviderCheckpoint = `-- name: CompletePaymentProviderCheckpoint :one
+UPDATE payment_provider_checkpoints
+SET last_successful_at = $1,
+    last_error_code = NULL,
+    lease_owner = NULL,
+    lease_expires_at = NULL,
+    version = version + 1
+WHERE id = $2
+  AND version = $3
+  AND lease_owner = $4
+RETURNING id, provider_account_id, cursor_value, last_transaction_external_id, last_occurred_at, last_attempted_at, last_successful_at, last_error_code, lease_owner, lease_expires_at, version, created_at, updated_at
+`
+
+type CompletePaymentProviderCheckpointParams struct {
+	CompletedAt        pgtype.Timestamptz `db:"completed_at" json:"completed_at"`
+	ID                 int64              `db:"id" json:"id"`
+	ExpectedVersion    int64              `db:"expected_version" json:"expected_version"`
+	ExpectedLeaseOwner pgtype.Text        `db:"expected_lease_owner" json:"expected_lease_owner"`
+}
+
+func (q *Queries) CompletePaymentProviderCheckpoint(ctx context.Context, arg CompletePaymentProviderCheckpointParams) (PaymentProviderCheckpoint, error) {
+	row := q.db.QueryRow(ctx, completePaymentProviderCheckpoint,
+		arg.CompletedAt,
+		arg.ID,
+		arg.ExpectedVersion,
+		arg.ExpectedLeaseOwner,
 	)
 	var i PaymentProviderCheckpoint
 	err := row.Scan(
@@ -321,6 +362,76 @@ func (q *Queries) GetPaymentProviderCheckpoint(ctx context.Context, providerAcco
 		&i.Version,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const getPaymentProviderHealth = `-- name: GetPaymentProviderHealth :one
+SELECT
+    (SELECT count(*)::bigint FROM payment_provider_accounts AS mapping
+     WHERE mapping.provider = $1
+       AND mapping.environment = $2
+       AND mapping.status = 'active') AS active_mappings,
+    (SELECT max(event.received_at)::timestamptz FROM payment_events AS event
+     WHERE event.provider = $1
+       AND event.payment_environment = $2
+       AND event.event_source = 'webhook') AS last_webhook_at,
+    (SELECT max(checkpoint.last_attempted_at)::timestamptz
+     FROM payment_provider_checkpoints AS checkpoint
+     JOIN payment_provider_accounts AS mapping ON mapping.id = checkpoint.provider_account_id
+     WHERE mapping.provider = $1 AND mapping.environment = $2) AS last_reconciliation_attempt,
+    (SELECT max(checkpoint.last_successful_at)::timestamptz
+     FROM payment_provider_checkpoints AS checkpoint
+     JOIN payment_provider_accounts AS mapping ON mapping.id = checkpoint.provider_account_id
+     WHERE mapping.provider = $1 AND mapping.environment = $2) AS last_reconciliation_success,
+    (SELECT checkpoint.last_error_code
+     FROM payment_provider_checkpoints AS checkpoint
+     JOIN payment_provider_accounts AS mapping ON mapping.id = checkpoint.provider_account_id
+     WHERE mapping.provider = $1 AND mapping.environment = $2
+       AND checkpoint.last_error_code IS NOT NULL
+     ORDER BY checkpoint.last_attempted_at DESC NULLS LAST, checkpoint.id DESC LIMIT 1) AS last_error_code,
+    (SELECT max(checkpoint.last_occurred_at)::timestamptz
+     FROM payment_provider_checkpoints AS checkpoint
+     JOIN payment_provider_accounts AS mapping ON mapping.id = checkpoint.provider_account_id
+     WHERE mapping.provider = $1 AND mapping.environment = $2) AS last_transaction_at,
+    (SELECT count(*)::bigint FROM payment_events AS event
+     WHERE event.provider = $1
+       AND event.payment_environment = $2
+       AND event.processing_status IN ('received', 'processing')) AS pending_events,
+    (SELECT count(*)::bigint FROM payment_review_cases AS review
+     WHERE review.provider = $1
+       AND review.payment_environment = $2
+       AND review.status IN ('open', 'held')) AS open_reviews
+`
+
+type GetPaymentProviderHealthParams struct {
+	Provider    string `db:"provider" json:"provider"`
+	Environment string `db:"environment" json:"environment"`
+}
+
+type GetPaymentProviderHealthRow struct {
+	ActiveMappings            int64              `db:"active_mappings" json:"active_mappings"`
+	LastWebhookAt             pgtype.Timestamptz `db:"last_webhook_at" json:"last_webhook_at"`
+	LastReconciliationAttempt pgtype.Timestamptz `db:"last_reconciliation_attempt" json:"last_reconciliation_attempt"`
+	LastReconciliationSuccess pgtype.Timestamptz `db:"last_reconciliation_success" json:"last_reconciliation_success"`
+	LastErrorCode             pgtype.Text        `db:"last_error_code" json:"last_error_code"`
+	LastTransactionAt         pgtype.Timestamptz `db:"last_transaction_at" json:"last_transaction_at"`
+	PendingEvents             int64              `db:"pending_events" json:"pending_events"`
+	OpenReviews               int64              `db:"open_reviews" json:"open_reviews"`
+}
+
+func (q *Queries) GetPaymentProviderHealth(ctx context.Context, arg GetPaymentProviderHealthParams) (GetPaymentProviderHealthRow, error) {
+	row := q.db.QueryRow(ctx, getPaymentProviderHealth, arg.Provider, arg.Environment)
+	var i GetPaymentProviderHealthRow
+	err := row.Scan(
+		&i.ActiveMappings,
+		&i.LastWebhookAt,
+		&i.LastReconciliationAttempt,
+		&i.LastReconciliationSuccess,
+		&i.LastErrorCode,
+		&i.LastTransactionAt,
+		&i.PendingEvents,
+		&i.OpenReviews,
 	)
 	return i, err
 }

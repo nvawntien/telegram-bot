@@ -41,73 +41,79 @@ func ParseCommand(text string) (Command, bool) {
 type CallbackAction string
 
 const (
-	CallbackMenu                    CallbackAction = "menu"
-	CallbackSupport                 CallbackAction = "support"
-	CallbackCategories              CallbackAction = "categories"
-	CallbackProducts                CallbackAction = "products"
-	CallbackProductDetail           CallbackAction = "product_detail"
-	CallbackOrderQuantity           CallbackAction = "order_quantity"
-	CallbackOrderBank               CallbackAction = "order_bank"
-	CallbackOrderConfirm            CallbackAction = "order_confirm"
-	CallbackOrders                  CallbackAction = "orders"
-	CallbackOrderView               CallbackAction = "order_view"
-	CallbackOrderAskCancel          CallbackAction = "order_ask_cancel"
-	CallbackOrderCancel             CallbackAction = "order_cancel"
-	CallbackOrderWalletAsk          CallbackAction = "order_wallet_ask"
-	CallbackOrderWalletPay          CallbackAction = "order_wallet_pay"
-	CallbackWalletTopupAmount       CallbackAction = "wallet_topup_amount"
-	CallbackWalletTopupBank         CallbackAction = "wallet_topup_bank"
-	CallbackWalletBalance           CallbackAction = "wallet_balance"
-	CallbackAdminCategories         CallbackAction = "admin_categories"
-	CallbackAdminProducts           CallbackAction = "admin_products"
-	CallbackAdminCategoryNew        CallbackAction = "admin_category_new"
-	CallbackAdminCategoryEdit       CallbackAction = "admin_category_edit"
-	CallbackAdminCategoryAskToggle  CallbackAction = "admin_category_ask_toggle"
-	CallbackAdminCategoryToggle     CallbackAction = "admin_category_toggle"
-	CallbackAdminProductNew         CallbackAction = "admin_product_new"
-	CallbackAdminProductEdit        CallbackAction = "admin_product_edit"
-	CallbackAdminProductAskToggle   CallbackAction = "admin_product_ask_toggle"
-	CallbackAdminProductToggle      CallbackAction = "admin_product_toggle"
-	CallbackAdminInventory          CallbackAction = "admin_inventory"
-	CallbackAdminInventoryList      CallbackAction = "admin_inventory_list"
-	CallbackAdminInventoryImport    CallbackAction = "admin_inventory_import"
-	CallbackAdminInventoryAskToggle CallbackAction = "admin_inventory_ask_toggle"
-	CallbackAdminInventoryToggle    CallbackAction = "admin_inventory_toggle"
-	CallbackAdminBanks              CallbackAction = "admin_banks"
-	CallbackAdminBankNew            CallbackAction = "admin_bank_new"
-	CallbackAdminBankEdit           CallbackAction = "admin_bank_edit"
-	CallbackAdminBankAskToggle      CallbackAction = "admin_bank_ask_toggle"
-	CallbackAdminBankToggle         CallbackAction = "admin_bank_toggle"
-	CallbackAdminPaymentReviews     CallbackAction = "admin_payment_reviews"
-	CallbackAdminPaymentManual      CallbackAction = "admin_payment_manual"
-	CallbackAdminPaymentResolve     CallbackAction = "admin_payment_resolve"
-	CallbackAdminWalletAdjustment   CallbackAction = "admin_wallet_adjustment"
-	CallbackAdminDeliveries         CallbackAction = "admin_deliveries"
-	CallbackAdminDeliveryDetail     CallbackAction = "admin_delivery_detail"
-	CallbackAdminDeliveryRetry      CallbackAction = "admin_delivery_retry"
-	CallbackAdminDeliveryComplete   CallbackAction = "admin_delivery_complete"
-	CallbackAdminDeliveryConfirm    CallbackAction = "admin_delivery_confirm"
-	CallbackAdminDeliveryReconcile  CallbackAction = "admin_delivery_reconcile"
-	CallbackAdminCancel             CallbackAction = "admin_cancel"
+	CallbackMenu                          CallbackAction = "menu"
+	CallbackSupport                       CallbackAction = "support"
+	CallbackCategories                    CallbackAction = "categories"
+	CallbackProducts                      CallbackAction = "products"
+	CallbackProductDetail                 CallbackAction = "product_detail"
+	CallbackOrderQuantity                 CallbackAction = "order_quantity"
+	CallbackOrderBank                     CallbackAction = "order_bank"
+	CallbackOrderConfirm                  CallbackAction = "order_confirm"
+	CallbackOrders                        CallbackAction = "orders"
+	CallbackOrderView                     CallbackAction = "order_view"
+	CallbackOrderAskCancel                CallbackAction = "order_ask_cancel"
+	CallbackOrderCancel                   CallbackAction = "order_cancel"
+	CallbackOrderWalletAsk                CallbackAction = "order_wallet_ask"
+	CallbackOrderWalletPay                CallbackAction = "order_wallet_pay"
+	CallbackWalletTopupAmount             CallbackAction = "wallet_topup_amount"
+	CallbackWalletTopupBank               CallbackAction = "wallet_topup_bank"
+	CallbackWalletBalance                 CallbackAction = "wallet_balance"
+	CallbackAdminCategories               CallbackAction = "admin_categories"
+	CallbackAdminProducts                 CallbackAction = "admin_products"
+	CallbackAdminCategoryNew              CallbackAction = "admin_category_new"
+	CallbackAdminCategoryEdit             CallbackAction = "admin_category_edit"
+	CallbackAdminCategoryAskToggle        CallbackAction = "admin_category_ask_toggle"
+	CallbackAdminCategoryToggle           CallbackAction = "admin_category_toggle"
+	CallbackAdminProductNew               CallbackAction = "admin_product_new"
+	CallbackAdminProductEdit              CallbackAction = "admin_product_edit"
+	CallbackAdminProductAskToggle         CallbackAction = "admin_product_ask_toggle"
+	CallbackAdminProductToggle            CallbackAction = "admin_product_toggle"
+	CallbackAdminInventory                CallbackAction = "admin_inventory"
+	CallbackAdminInventoryList            CallbackAction = "admin_inventory_list"
+	CallbackAdminInventoryImport          CallbackAction = "admin_inventory_import"
+	CallbackAdminInventoryAskToggle       CallbackAction = "admin_inventory_ask_toggle"
+	CallbackAdminInventoryToggle          CallbackAction = "admin_inventory_toggle"
+	CallbackAdminBanks                    CallbackAction = "admin_banks"
+	CallbackAdminBankNew                  CallbackAction = "admin_bank_new"
+	CallbackAdminBankEdit                 CallbackAction = "admin_bank_edit"
+	CallbackAdminBankAskToggle            CallbackAction = "admin_bank_ask_toggle"
+	CallbackAdminBankToggle               CallbackAction = "admin_bank_toggle"
+	CallbackAdminPaymentReviews           CallbackAction = "admin_payment_reviews"
+	CallbackAdminPaymentManual            CallbackAction = "admin_payment_manual"
+	CallbackAdminPaymentResolve           CallbackAction = "admin_payment_resolve"
+	CallbackAdminWalletAdjustment         CallbackAction = "admin_wallet_adjustment"
+	CallbackAdminDeliveries               CallbackAction = "admin_deliveries"
+	CallbackAdminDeliveryDetail           CallbackAction = "admin_delivery_detail"
+	CallbackAdminDeliveryRetry            CallbackAction = "admin_delivery_retry"
+	CallbackAdminDeliveryComplete         CallbackAction = "admin_delivery_complete"
+	CallbackAdminDeliveryConfirm          CallbackAction = "admin_delivery_confirm"
+	CallbackAdminDeliveryReconcile        CallbackAction = "admin_delivery_reconcile"
+	CallbackAdminProviderHealth           CallbackAction = "admin_provider_health"
+	CallbackAdminProviderAccounts         CallbackAction = "admin_provider_accounts"
+	CallbackAdminProviderAccountNew       CallbackAction = "admin_provider_account_new"
+	CallbackAdminProviderAccountAskToggle CallbackAction = "admin_provider_account_ask_toggle"
+	CallbackAdminProviderAccountToggle    CallbackAction = "admin_provider_account_toggle"
+	CallbackAdminCancel                   CallbackAction = "admin_cancel"
 )
 
 type Callback struct {
-	Action         CallbackAction
-	Page           int
-	CategoryID     int64
-	ProductID      int64
-	BankAccountID  int64
-	OrderID        int64
-	FlowID         int64
-	Quantity       int32
-	InventoryID    int64
-	RecordVersion  int64
-	SessionID      int64
-	SessionVersion int64
-	Active         bool
-	AmountVND      int64
-	ReviewID       int64
-	DeliveryID     int64
+	Action            CallbackAction
+	Page              int
+	CategoryID        int64
+	ProductID         int64
+	BankAccountID     int64
+	OrderID           int64
+	FlowID            int64
+	Quantity          int32
+	InventoryID       int64
+	RecordVersion     int64
+	SessionID         int64
+	SessionVersion    int64
+	Active            bool
+	AmountVND         int64
+	ReviewID          int64
+	DeliveryID        int64
+	ProviderAccountID int64
 }
 
 func ParseCallback(data string) (Callback, error) {
@@ -166,6 +172,49 @@ func parseOrderCallback(parts []string) (Callback, error) {
 		return Callback{}, ErrInvalidCallback
 	}
 	switch parts[2] {
+	case "qh":
+		return exact(parts, 3, Callback{Action: CallbackAdminProviderHealth})
+	case "ql":
+		page, err := parseNonNegative(parts, 3, 4)
+		return Callback{Action: CallbackAdminProviderAccounts, Page: int(page)}, err
+	case "qn":
+		return exact(parts, 3, Callback{Action: CallbackAdminProviderAccountNew})
+	case "qa":
+		if len(parts) != 6 {
+			return Callback{}, ErrInvalidCallback
+		}
+		mappingID, err := positive(parts[3])
+		if err != nil {
+			return Callback{}, err
+		}
+		version, err := positive(parts[4])
+		if err != nil {
+			return Callback{}, err
+		}
+		active, err := parseBoolBit(parts[5])
+		return Callback{Action: CallbackAdminProviderAccountAskToggle, ProviderAccountID: mappingID, RecordVersion: version, Active: active}, err
+	case "qt":
+		if len(parts) != 8 {
+			return Callback{}, ErrInvalidCallback
+		}
+		sessionID, err := positive(parts[3])
+		if err != nil {
+			return Callback{}, err
+		}
+		sessionVersion, err := positive(parts[4])
+		if err != nil {
+			return Callback{}, err
+		}
+		mappingID, err := positive(parts[5])
+		if err != nil {
+			return Callback{}, err
+		}
+		version, err := positive(parts[6])
+		if err != nil {
+			return Callback{}, err
+		}
+		active, err := parseBoolBit(parts[7])
+		return Callback{Action: CallbackAdminProviderAccountToggle, SessionID: sessionID, SessionVersion: sessionVersion, ProviderAccountID: mappingID, RecordVersion: version, Active: active}, err
 	case "q":
 		if len(parts) != 5 {
 			return Callback{}, ErrInvalidCallback

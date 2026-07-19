@@ -13,6 +13,7 @@ import (
 	"github.com/nvawntien/telegram-bot/internal/config"
 	"github.com/nvawntien/telegram-bot/internal/inventorycrypto"
 	"github.com/nvawntien/telegram-bot/internal/observability"
+	"github.com/nvawntien/telegram-bot/internal/payment"
 	"github.com/nvawntien/telegram-bot/internal/postgres"
 	telegramadapter "github.com/nvawntien/telegram-bot/internal/telegram"
 	"github.com/nvawntien/telegram-bot/internal/worker"
@@ -59,6 +60,13 @@ func run(ctx context.Context) error {
 		store, paymentAcceptance, cfg.PaymentEventBatchSize,
 		cfg.PaymentEventRetryBase, cfg.PaymentStaleProcessingTimeout,
 	)
+	referenceExtractor, err := app.NewPaymentReferenceExtractor(
+		cfg.PaymentReferencePrefix, cfg.PaymentReferenceRandomBytes, app.DefaultPaymentTransferContentLimit,
+	)
+	if err != nil {
+		return fmt.Errorf("initialize payment reference extractor: %w", err)
+	}
+	paymentEvents.WithReferenceExtractor(referenceExtractor)
 	deliveryMetrics := observability.NewDeliveryMetrics(prometheus.DefaultRegisterer)
 	inventoryCipher, err := inventorycrypto.New(cfg.InventoryEncryptionKey, cfg.InventoryEncryptionKeyVersion, nil)
 	if err != nil {
@@ -84,5 +92,24 @@ func run(ctx context.Context) error {
 		30*time.Second, cfg.OrderExpiryInterval, cfg.OrderExpiryRunTimeout, expiryMetrics,
 	).WithPaymentEvents(paymentEvents, cfg.PaymentEventPollInterval, cfg.PaymentEventRunTimeout, paymentMetrics).
 		WithDelivery(deliveryJob, cfg.DeliveryPollInterval, cfg.DeliveryRunTimeout)
+	if cfg.PaymentReconciliationEnabled {
+		providerRegistry, registryErr := payment.NewProviderRegistry()
+		if registryErr != nil {
+			return fmt.Errorf("initialize reconciliation provider registry: %w", registryErr)
+		}
+		reconciliation, reconciliationErr := payment.NewReconciliationJob(
+			providerRegistry, store,
+			app.NewPaymentEventIngestionService(store, cfg.PaymentEventMaxAttempts),
+			fmt.Sprintf("%s-%d", hostname, os.Getpid()),
+			cfg.PaymentReconciliationMaxPages, cfg.PaymentReconciliationPageSize,
+			cfg.PaymentReconciliationRequestTimeout,
+			cfg.PaymentReconciliationRunTimeout+cfg.PaymentReconciliationRequestTimeout,
+			paymentMetrics,
+		)
+		if reconciliationErr != nil {
+			return fmt.Errorf("initialize provider reconciliation: %w", reconciliationErr)
+		}
+		runner.WithPaymentReconciliation(reconciliation, cfg.PaymentReconciliationInterval, cfg.PaymentReconciliationRunTimeout)
+	}
 	return runner.Run(ctx)
 }

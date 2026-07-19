@@ -5,6 +5,7 @@ import (
 	"html"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/nvawntien/telegram-bot/internal/app"
 	"github.com/nvawntien/telegram-bot/internal/domain"
@@ -171,11 +172,62 @@ func AdminMenu() (string, Keyboard) {
 		{{Text: "Kho mã hóa", Data: "v1:a:i:0"}},
 		{{Text: "Tài khoản ngân hàng", Data: "v1:a:b:0"}},
 		{{Text: "Payment reviews", Data: "v1:a:pr:0"}},
+		{{Text: "Payment providers", Data: "v1:a:qh"}},
 		{{Text: "Manual confirm", Data: "v1:a:pm"}},
 		{{Text: "Điều chỉnh ví", Data: "v1:a:wa"}},
 		{{Text: "Delivery queue", Data: "v1:a:dl:0"}},
 		{{Text: "Delivery reconciliation", Data: "v1:a:dx"}},
 	}
+}
+
+func PaymentProviderHealthView(items []app.PaymentProviderHealth) (string, Keyboard) {
+	lines := []string{"<b>Payment provider health</b>"}
+	for _, item := range items {
+		capabilities := make([]string, 0, 2)
+		if item.Capabilities.Webhook {
+			capabilities = append(capabilities, "webhook")
+		}
+		if item.Capabilities.Reconciliation {
+			capabilities = append(capabilities, "reconciliation")
+		}
+		line := fmt.Sprintf("\n<b>%s</b> · %s · %s\nMappings: %d · pending: %d · reviews: %d", Escape(item.Name), Escape(item.Environment), Escape(strings.Join(capabilities, "+")), item.ActiveMappings, item.PendingEvents, item.OpenReviews)
+		if !item.LastWebhookAt.IsZero() {
+			line += "\nLast webhook: " + item.LastWebhookAt.UTC().Format(time.RFC3339)
+		}
+		if !item.LastReconciliationSuccess.IsZero() {
+			line += "\nLast reconciliation: " + item.LastReconciliationSuccess.UTC().Format(time.RFC3339)
+		}
+		if item.LastErrorCode != "" {
+			line += "\nLast error: <code>" + Escape(item.LastErrorCode) + "</code>"
+		}
+		lines = append(lines, line)
+	}
+	if len(items) == 0 {
+		lines = append(lines, "Chưa có provider được bật.")
+	}
+	return strings.Join(lines, "\n"), Keyboard{
+		{{Text: "Account mappings", Data: "v1:a:ql:0"}},
+		{{Text: "⬅️ Admin", Data: "v1:m"}},
+	}
+}
+
+func PaymentProviderAccountsView(page app.PaymentProviderAccountPage) (string, Keyboard) {
+	lines := []string{"<b>Provider account mappings</b>"}
+	rows := Keyboard{{{Text: "➕ Link account", Data: "v1:a:qn"}}}
+	for _, item := range page.Items {
+		status, target := "🟢", 0
+		if item.Status != "active" {
+			status, target = "⚪", 1
+		}
+		lines = append(lines, fmt.Sprintf("%s #%d · %s/%s · %s → %s ••••%s · v%d", status, item.ID, Escape(item.Provider), Escape(item.Environment), Escape(item.MaskedExternalIdentity), Escape(item.LocalBankDisplayName), Escape(item.LocalBankLast4), item.Version))
+		rows = append(rows, []Button{{Text: "Bật/tắt #" + strconv.FormatInt(item.ID, 10), Data: fmt.Sprintf("v1:a:qa:%d:%d:%d", item.ID, item.Version, target)}})
+	}
+	if len(page.Items) == 0 {
+		lines = append(lines, "Chưa có mapping.")
+	}
+	rows = append(rows, navigationRows("v1:a:ql:%d", page.Page)...)
+	rows = append(rows, []Button{{Text: "⬅️ Provider health", Data: "v1:a:qh"}})
+	return strings.Join(lines, "\n"), rows
 }
 
 func DeliveryReviewsView(page app.DeliveryReviewPage) (string, Keyboard) {

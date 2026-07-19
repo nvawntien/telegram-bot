@@ -66,7 +66,7 @@ func (s *AppStore) CreateWalletTopup(ctx context.Context, command app.CreateWall
 		if err != nil {
 			return err
 		}
-		bank, err := queries.GetActiveBankAccountForOrder(ctx, command.BankAccountID)
+		bank, err := queries.GetActiveBankAccountForOrder(ctx, generated.GetActiveBankAccountForOrderParams{ID: command.BankAccountID, PaymentEnvironment: command.PaymentEnvironment})
 		if errors.Is(err, pgx.ErrNoRows) {
 			return app.ErrBankAccountInactive
 		}

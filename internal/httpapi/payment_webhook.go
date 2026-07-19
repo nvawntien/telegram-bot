@@ -76,10 +76,12 @@ func (w *PaymentWebhook) Handler() gin.HandlerFunc {
 				result = "unauthorized"
 				status = http.StatusUnauthorized
 			}
+			w.observeSignature(providerName, result)
 			w.observeWebhook(providerName, result)
 			c.AbortWithStatusJSON(status, gin.H{"error": "payment webhook rejected"})
 			return
 		}
+		w.observeSignature(providerName, "verified")
 		result, err := w.ingester.Ingest(requestContext, event)
 		if err != nil {
 			if errors.Is(err, app.ErrPaymentEventConflict) {
@@ -99,6 +101,7 @@ func (w *PaymentWebhook) Handler() gin.HandlerFunc {
 		}
 		w.observeWebhook(providerName, ingestionResult)
 		w.observeIngested(providerName, ingestionResult)
+		w.observeProviderEvent(providerName, event.Source, ingestionResult)
 		if err := validateProviderAcknowledgement(acknowledgement); err != nil {
 			w.observeWebhook(providerName, "invalid_acknowledgement")
 			c.AbortWithStatusJSON(http.StatusServiceUnavailable, gin.H{"error": "payment provider acknowledgement unavailable"})
@@ -113,6 +116,22 @@ func (w *PaymentWebhook) Handler() gin.HandlerFunc {
 			responseBody = acknowledgement.DuplicateBody
 		}
 		c.Data(acknowledgement.StatusCode, contentType, responseBody)
+	}
+}
+
+func (w *PaymentWebhook) observeSignature(provider, result string) {
+	if metrics, ok := w.metrics.(interface {
+		ObserveProviderSignatureVerification(string, string)
+	}); ok {
+		metrics.ObserveProviderSignatureVerification(provider, result)
+	}
+}
+
+func (w *PaymentWebhook) observeProviderEvent(provider, source, result string) {
+	if metrics, ok := w.metrics.(interface {
+		ObserveProviderEvent(string, string, string)
+	}); ok {
+		metrics.ObserveProviderEvent(provider, source, result)
 	}
 }
 

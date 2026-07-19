@@ -33,11 +33,17 @@ type Router struct {
 	wallet         *app.WalletService
 	payments       *app.PaymentAdminService
 	deliveries     *app.DeliveryAdminService
+	providers      *app.PaymentProviderAdminService
 	updates        *app.UpdateService
 	messenger      Messenger
 	supportContact string
 	logger         *slog.Logger
 	metrics        RouterMetrics
+}
+
+func (r *Router) WithPaymentProviderAdministration(providers *app.PaymentProviderAdminService) *Router {
+	r.providers = providers
+	return r
 }
 
 func (r *Router) WithDeliveryAdministration(deliveries *app.DeliveryAdminService) *Router {
@@ -564,6 +570,68 @@ func (r *Router) routeCallback(ctx context.Context, telegramID int64, callback C
 			return plan, err
 		}
 		plan.text, plan.keyboard = AdminBankAccountsView(page)
+	case CallbackAdminProviderHealth:
+		if r.providers == nil {
+			return plan, app.ErrNotFound
+		}
+		items, err := r.providers.Health(ctx, telegramID)
+		if err != nil {
+			return plan, err
+		}
+		plan.text, plan.keyboard = PaymentProviderHealthView(items)
+	case CallbackAdminProviderAccounts:
+		if r.providers == nil {
+			return plan, app.ErrNotFound
+		}
+		page, err := r.providers.ListAccounts(ctx, telegramID, callback.Page)
+		if err != nil {
+			return plan, err
+		}
+		plan.text, plan.keyboard = PaymentProviderAccountsView(page)
+	case CallbackAdminProviderAccountNew:
+		if r.providers == nil {
+			return plan, app.ErrNotFound
+		}
+		session, err := r.admins.StartSession(ctx, telegramID, app.SessionProviderAccountCreate, workflowPayload{Step: "input"}, meta)
+		r.observeSession("start", err)
+		if err != nil {
+			return plan, err
+		}
+		plan.text = "Gửi: provider|environment|external_account_identity|local_bank_account_id|CONFIRM\nGiá trị identity sẽ không được hiển thị lại đầy đủ."
+		plan.keyboard, plan.completedByApp = cancelKeyboard(session), true
+	case CallbackAdminProviderAccountAskToggle:
+		if r.providers == nil {
+			return plan, app.ErrNotFound
+		}
+		session, err := r.admins.StartSession(ctx, telegramID, app.SessionProviderAccountToggle, workflowPayload{
+			Step: "confirm", ProviderAccountID: callback.ProviderAccountID,
+			RecordVersion: callback.RecordVersion, Active: callback.Active,
+		}, meta)
+		r.observeSession("start", err)
+		if err != nil {
+			return plan, err
+		}
+		plan.text = "Xác nhận đổi trạng thái provider account mapping?"
+		plan.keyboard = Keyboard{{{Text: "Xác nhận", Data: fmt.Sprintf("v1:a:qt:%d:%d:%d:%d:%d", session.ID, session.Version, callback.ProviderAccountID, callback.RecordVersion, boolBit(callback.Active))}}}
+		plan.completedByApp = true
+	case CallbackAdminProviderAccountToggle:
+		if r.providers == nil {
+			return plan, app.ErrNotFound
+		}
+		admin, err := r.admins.Authorize(ctx, telegramID, true)
+		if err != nil {
+			return plan, err
+		}
+		session := app.AdminSession{ID: callback.SessionID, AdminID: admin.ID, Version: callback.SessionVersion}
+		mapping, err := r.providers.SetAccountActive(ctx, app.SetPaymentProviderAccountStatusCommand{
+			AdminTelegramID: telegramID, MappingID: callback.ProviderAccountID,
+			ExpectedVersion: callback.RecordVersion, Active: callback.Active, Confirmed: true,
+			Session: session, Meta: meta,
+		})
+		if err != nil {
+			return plan, err
+		}
+		plan.text, plan.completedByApp = fmt.Sprintf("Đã cập nhật provider mapping #%d thành %s.", mapping.ID, Escape(mapping.Status)), true
 	case CallbackAdminBankNew:
 		session, err := r.admins.StartSession(ctx, telegramID, app.SessionBankCreate, workflowPayload{Step: "bank_bin"}, meta)
 		r.observeSession("start", err)
@@ -774,6 +842,7 @@ type workflowPayload struct {
 	DisplayName       string `json:"display_name,omitempty"`
 	AccountName       string `json:"account_name,omitempty"`
 	DeliveryID        int64  `json:"delivery_id,omitempty"`
+	ProviderAccountID int64  `json:"provider_account_id,omitempty"`
 	TelegramMessageID int64  `json:"telegram_message_id,omitempty"`
 	Reason            string `json:"reason,omitempty"`
 }
@@ -787,6 +856,27 @@ func (r *Router) handleSessionText(ctx context.Context, updateID int64, requestI
 	meta := app.RequestMeta{RequestID: requestID, UpdateID: updateID}
 	plan := responsePlan{chatID: message.Chat.ID, completedByApp: true}
 	switch session.State {
+	case app.SessionProviderAccountCreate:
+		if r.providers == nil || payload.Step != "input" {
+			return responsePlan{}, app.ErrStaleVersion
+		}
+		parts := strings.SplitN(text, "|", 5)
+		if len(parts) != 5 || strings.ToUpper(strings.TrimSpace(parts[4])) != "CONFIRM" {
+			return responsePlan{}, app.ErrInvalidInput
+		}
+		bankID, err := strconv.ParseInt(strings.TrimSpace(parts[3]), 10, 64)
+		if err != nil || bankID <= 0 {
+			return responsePlan{}, app.ErrInvalidInput
+		}
+		mapping, err := r.providers.CreateAccount(ctx, app.CreatePaymentProviderAccountCommand{
+			AdminTelegramID: message.From.ID, Provider: parts[0], Environment: parts[1],
+			ExternalAccountIdentity: parts[2], LocalBankAccountID: bankID,
+			Confirmed: true, Session: session, Meta: meta,
+		})
+		if err != nil {
+			return responsePlan{}, err
+		}
+		plan.text = fmt.Sprintf("Đã link provider mapping #%d: %s → bank #%d.", mapping.ID, Escape(mapping.MaskedExternalIdentity), mapping.LocalBankAccountID)
 	case app.SessionDeliveryRetry, app.SessionDeliveryComplete:
 		if payload.DeliveryID <= 0 || payload.RecordVersion <= 0 || payload.Step == "confirm" {
 			return responsePlan{}, app.ErrStaleVersion

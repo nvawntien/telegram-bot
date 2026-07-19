@@ -184,6 +184,52 @@ func TestSignedJSONProviderRequiresSecretOnlyWhenEnabled(t *testing.T) {
 	}
 }
 
+func TestPaymentProviderConfiguration(t *testing.T) {
+	setValidEnvironment(t)
+	t.Setenv("PAYMENT_PROVIDERS", "signed_json")
+	t.Setenv("PAYMENT_PRIMARY_PROVIDER", "signed_json")
+	t.Setenv("PAYMENT_PROVIDER_ENVIRONMENT", "test")
+	t.Setenv("SIGNED_JSON_WEBHOOK_SECRET", "0123456789abcdef")
+	t.Setenv("PAYMENT_RECONCILIATION_INTERVAL", "60")
+	t.Setenv("PAYMENT_RECONCILIATION_RUN_TIMEOUT", "30")
+	t.Setenv("PAYMENT_RECONCILIATION_REQUEST_TIMEOUT", "5")
+	t.Setenv("PAYMENT_RECONCILIATION_MAX_PAGES", "4")
+	t.Setenv("PAYMENT_RECONCILIATION_PAGE_SIZE", "50")
+	cfg, err := LoadAPI()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(cfg.PaymentProviders) != 1 || cfg.PaymentPrimaryProvider != "signed_json" || cfg.PaymentProviderEnvironment != "test" || cfg.PaymentReconciliationMaxPages != 4 || cfg.PaymentReconciliationPageSize != 50 {
+		t.Fatalf("provider config = %#v", cfg)
+	}
+}
+
+func TestSignedJSONProviderCannotStartInProduction(t *testing.T) {
+	setValidEnvironment(t)
+	t.Setenv("APP_ENV", "production")
+	t.Setenv("TELEGRAM_WEBHOOK_URL", "https://example.test/webhooks/telegram")
+	t.Setenv("PAYMENT_PROVIDERS", "signed_json")
+	t.Setenv("SIGNED_JSON_WEBHOOK_SECRET", "0123456789abcdef")
+	_, err := LoadAPI()
+	if err == nil || !strings.Contains(err.Error(), "signed_json cannot be enabled in production") {
+		t.Fatalf("LoadAPI() error = %v", err)
+	}
+}
+
+func TestPaymentProviderConfigurationRejectsCrossEnvironmentAndUnsafeBounds(t *testing.T) {
+	setValidEnvironment(t)
+	t.Setenv("PAYMENT_PRIMARY_PROVIDER", "missing")
+	t.Setenv("PAYMENT_PROVIDER_ENVIRONMENT", "staging")
+	t.Setenv("PAYMENT_RECONCILIATION_MAX_PAGES", "101")
+	t.Setenv("PAYMENT_RECONCILIATION_PAGE_SIZE", "1001")
+	t.Setenv("PAYMENT_RECONCILIATION_RUN_TIMEOUT", "5")
+	t.Setenv("PAYMENT_RECONCILIATION_REQUEST_TIMEOUT", "5")
+	_, err := LoadWorker()
+	if err == nil || !strings.Contains(err.Error(), "PAYMENT_PROVIDER_ENVIRONMENT") || !strings.Contains(err.Error(), "PAYMENT_PRIMARY_PROVIDER") || !strings.Contains(err.Error(), "outside its safe range") {
+		t.Fatalf("LoadWorker() error = %v", err)
+	}
+}
+
 func setValidEnvironment(t *testing.T) {
 	t.Helper()
 	t.Setenv("APP_ENV", "local")

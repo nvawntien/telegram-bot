@@ -9,8 +9,8 @@ import (
 	"github.com/nvawntien/telegram-bot/internal/postgres/generated"
 )
 
-func (s *AppStore) ListActiveBankAccounts(ctx context.Context) ([]app.BankAccountOption, error) {
-	rows, err := s.queries.ListActiveBankAccountOptions(ctx)
+func (s *AppStore) ListActiveBankAccounts(ctx context.Context, environment string) ([]app.BankAccountOption, error) {
+	rows, err := s.queries.ListActiveBankAccountOptions(ctx, environment)
 	if err != nil {
 		return nil, err
 	}
@@ -19,7 +19,7 @@ func (s *AppStore) ListActiveBankAccounts(ctx context.Context) ([]app.BankAccoun
 		items = append(items, app.BankAccountOption{
 			ID: row.ID, BankBIN: row.BankBin, BankName: row.BankName,
 			DisplayName: row.DisplayName, AccountName: row.AccountName,
-			Last4: row.DisplayLast4, SortOrder: row.SortOrder, Version: row.Version,
+			Last4: row.DisplayLast4, SortOrder: row.SortOrder, Version: row.Version, PaymentEnvironment: row.PaymentEnvironment,
 		})
 	}
 	return items, nil
@@ -40,7 +40,7 @@ func (s *AppStore) ListAdminBankAccounts(ctx context.Context, offset, limit int3
 			BankAccountOption: app.BankAccountOption{
 				ID: row.ID, BankBIN: row.BankBin, BankName: row.BankName,
 				DisplayName: row.DisplayName, AccountName: row.AccountName,
-				Last4: row.DisplayLast4, SortOrder: row.SortOrder, Version: row.Version,
+				Last4: row.DisplayLast4, SortOrder: row.SortOrder, Version: row.Version, PaymentEnvironment: row.PaymentEnvironment,
 			},
 			Active: row.IsActive, KeyVersion: row.EncryptionKeyVersion,
 			Format: row.EncryptionFormat, CreatedAt: row.CreatedAt.Time,
@@ -70,6 +70,7 @@ func (s *AppStore) CreateBankAccount(
 			AccountNumberFingerprint: protected.Fingerprint, EncryptionKeyID: protected.KeyID,
 			EncryptionNonce: protected.Nonce, EncryptionKeyVersion: protected.KeyVersion,
 			DisplayLast4: last4(input.AccountNumber), SortOrder: input.SortOrder,
+			PaymentEnvironment: input.PaymentEnvironment,
 		})
 		if errors.Is(err, pgx.ErrNoRows) {
 			return app.ErrConflict
@@ -196,7 +197,7 @@ func mapRedactedBank(row generated.BankAccount) app.RedactedBankAccount {
 		BankAccountOption: app.BankAccountOption{
 			ID: row.ID, BankBIN: row.BankBin, BankName: row.BankName,
 			DisplayName: row.DisplayName, AccountName: row.AccountName,
-			Last4: row.DisplayLast4, SortOrder: row.SortOrder, Version: row.Version,
+			Last4: row.DisplayLast4, SortOrder: row.SortOrder, Version: row.Version, PaymentEnvironment: row.PaymentEnvironment,
 		},
 		Active: row.IsActive, KeyVersion: row.EncryptionKeyVersion,
 		Format: row.EncryptionFormat, CreatedAt: row.CreatedAt.Time,
@@ -209,6 +210,7 @@ func bankAuditSnapshot(value app.RedactedBankAccount) map[string]any {
 		"display_name": value.DisplayName, "account_name": value.AccountName,
 		"account_last4": value.Last4, "sort_order": value.SortOrder,
 		"active": value.Active, "version": value.Version,
+		"payment_environment": value.PaymentEnvironment,
 	}
 }
 

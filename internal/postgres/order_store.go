@@ -64,8 +64,8 @@ func (tx *orderTransaction) CountClaimableInventory(ctx context.Context, product
 	return tx.queries.CountClaimableInventoryForOrder(ctx, productID)
 }
 
-func (tx *orderTransaction) GetActiveBankAccountForOrder(ctx context.Context, bankID int64) (app.BankAccountRecord, error) {
-	row, err := tx.queries.GetActiveBankAccountForOrder(ctx, bankID)
+func (tx *orderTransaction) GetActiveBankAccountForOrder(ctx context.Context, bankID int64, environment string) (app.BankAccountRecord, error) {
+	row, err := tx.queries.GetActiveBankAccountForOrder(ctx, generated.GetActiveBankAccountForOrderParams{ID: bankID, PaymentEnvironment: environment})
 	if errors.Is(err, pgx.ErrNoRows) {
 		return app.BankAccountRecord{}, app.ErrBankAccountNotFound
 	}
@@ -76,7 +76,7 @@ func (tx *orderTransaction) GetActiveBankAccountForOrder(ctx context.Context, ba
 		BankAccountOption: app.BankAccountOption{
 			ID: row.ID, BankBIN: row.BankBin, BankName: row.BankName,
 			DisplayName: row.DisplayName, AccountName: row.AccountName,
-			Last4: row.DisplayLast4, SortOrder: row.SortOrder, Version: row.Version,
+			Last4: row.DisplayLast4, SortOrder: row.SortOrder, Version: row.Version, PaymentEnvironment: row.PaymentEnvironment,
 		},
 		Protected: app.ProtectedBankAccountNumber{
 			Ciphertext:  append([]byte(nil), row.EncryptedAccountNumber...),

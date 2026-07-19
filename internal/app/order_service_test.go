@@ -133,7 +133,7 @@ func (*testOrderTransaction) CountClaimableInventory(context.Context, int64) (in
 	return 10, nil
 }
 
-func (*testOrderTransaction) GetActiveBankAccountForOrder(context.Context, int64) (BankAccountRecord, error) {
+func (*testOrderTransaction) GetActiveBankAccountForOrder(context.Context, int64, string) (BankAccountRecord, error) {
 	return BankAccountRecord{
 		BankAccountOption: BankAccountOption{ID: 30, BankBIN: "970422", BankName: "Test", DisplayName: "Primary", AccountName: "OWNER", Last4: "7890"},
 		Protected:         ProtectedBankAccountNumber{Format: "test"}, Active: true,

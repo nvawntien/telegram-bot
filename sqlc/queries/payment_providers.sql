@@ -78,7 +78,16 @@ UPDATE payment_provider_checkpoints
 SET cursor_value = sqlc.narg(cursor_value),
     last_transaction_external_id = sqlc.narg(last_transaction_external_id),
     last_occurred_at = sqlc.narg(last_occurred_at),
-    last_successful_at = sqlc.arg(completed_at),
+    last_error_code = NULL,
+    version = version + 1
+WHERE id = sqlc.arg(id)
+  AND version = sqlc.arg(expected_version)
+  AND lease_owner = sqlc.arg(expected_lease_owner)
+RETURNING *;
+
+-- name: CompletePaymentProviderCheckpoint :one
+UPDATE payment_provider_checkpoints
+SET last_successful_at = sqlc.arg(completed_at),
     last_error_code = NULL,
     lease_owner = NULL,
     lease_expires_at = NULL,
@@ -120,6 +129,43 @@ SELECT max(received_at)::timestamptz FROM payment_events
 WHERE provider = sqlc.arg(provider)
   AND payment_environment = sqlc.arg(environment)
   AND event_source = 'webhook';
+
+-- name: GetPaymentProviderHealth :one
+SELECT
+    (SELECT count(*)::bigint FROM payment_provider_accounts AS mapping
+     WHERE mapping.provider = sqlc.arg(provider)
+       AND mapping.environment = sqlc.arg(environment)
+       AND mapping.status = 'active') AS active_mappings,
+    (SELECT max(event.received_at)::timestamptz FROM payment_events AS event
+     WHERE event.provider = sqlc.arg(provider)
+       AND event.payment_environment = sqlc.arg(environment)
+       AND event.event_source = 'webhook') AS last_webhook_at,
+    (SELECT max(checkpoint.last_attempted_at)::timestamptz
+     FROM payment_provider_checkpoints AS checkpoint
+     JOIN payment_provider_accounts AS mapping ON mapping.id = checkpoint.provider_account_id
+     WHERE mapping.provider = sqlc.arg(provider) AND mapping.environment = sqlc.arg(environment)) AS last_reconciliation_attempt,
+    (SELECT max(checkpoint.last_successful_at)::timestamptz
+     FROM payment_provider_checkpoints AS checkpoint
+     JOIN payment_provider_accounts AS mapping ON mapping.id = checkpoint.provider_account_id
+     WHERE mapping.provider = sqlc.arg(provider) AND mapping.environment = sqlc.arg(environment)) AS last_reconciliation_success,
+    (SELECT checkpoint.last_error_code
+     FROM payment_provider_checkpoints AS checkpoint
+     JOIN payment_provider_accounts AS mapping ON mapping.id = checkpoint.provider_account_id
+     WHERE mapping.provider = sqlc.arg(provider) AND mapping.environment = sqlc.arg(environment)
+       AND checkpoint.last_error_code IS NOT NULL
+     ORDER BY checkpoint.last_attempted_at DESC NULLS LAST, checkpoint.id DESC LIMIT 1) AS last_error_code,
+    (SELECT max(checkpoint.last_occurred_at)::timestamptz
+     FROM payment_provider_checkpoints AS checkpoint
+     JOIN payment_provider_accounts AS mapping ON mapping.id = checkpoint.provider_account_id
+     WHERE mapping.provider = sqlc.arg(provider) AND mapping.environment = sqlc.arg(environment)) AS last_transaction_at,
+    (SELECT count(*)::bigint FROM payment_events AS event
+     WHERE event.provider = sqlc.arg(provider)
+       AND event.payment_environment = sqlc.arg(environment)
+       AND event.processing_status IN ('received', 'processing')) AS pending_events,
+    (SELECT count(*)::bigint FROM payment_review_cases AS review
+     WHERE review.provider = sqlc.arg(provider)
+       AND review.payment_environment = sqlc.arg(environment)
+       AND review.status IN ('open', 'held')) AS open_reviews;
 
 -- name: CountPaymentReferenceTargets :one
 SELECT (

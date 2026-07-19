@@ -230,14 +230,15 @@ type ProtectedBankAccountNumber struct {
 }
 
 type BankAccountOption struct {
-	ID          int64
-	BankBIN     string
-	BankName    string
-	DisplayName string
-	AccountName string
-	Last4       string
-	SortOrder   int32
-	Version     int64
+	ID                 int64
+	BankBIN            string
+	BankName           string
+	DisplayName        string
+	AccountName        string
+	Last4              string
+	SortOrder          int32
+	Version            int64
+	PaymentEnvironment string
 }
 
 type BankAccountRecord struct {
@@ -261,12 +262,13 @@ type RedactedBankAccountPage struct {
 }
 
 type BankAccountInput struct {
-	BankBIN       string
-	BankName      string
-	DisplayName   string
-	AccountName   string
-	AccountNumber string
-	SortOrder     int32
+	BankBIN            string
+	BankName           string
+	DisplayName        string
+	AccountName        string
+	AccountNumber      string
+	SortOrder          int32
+	PaymentEnvironment string
 }
 
 type CreateBankAccountInput struct {

@@ -6,6 +6,8 @@ import (
 	"context"
 	"log/slog"
 	"time"
+
+	"github.com/nvawntien/telegram-bot/internal/payment"
 )
 
 // DependencyChecker verifies a worker dependency is still reachable.
@@ -33,22 +35,36 @@ type DeliveryJob interface {
 	RunOnce(context.Context) (int, error)
 }
 
+type PaymentReconciliationJob interface {
+	RunOnce(context.Context) (payment.ReconciliationSummary, error)
+}
+
 // Runner provides cancellation and dependency monitoring for future job loops.
 type Runner struct {
-	checker          DependencyChecker
-	logger           *slog.Logger
-	healthInterval   time.Duration
-	expiry           OrderExpiryJob
-	expiryInterval   time.Duration
-	runTimeout       time.Duration
-	metrics          ExpiryMetrics
-	payment          PaymentEventJob
-	paymentInterval  time.Duration
-	paymentTimeout   time.Duration
-	paymentMetrics   PaymentMetrics
-	delivery         DeliveryJob
-	deliveryInterval time.Duration
-	deliveryTimeout  time.Duration
+	checker                DependencyChecker
+	logger                 *slog.Logger
+	healthInterval         time.Duration
+	expiry                 OrderExpiryJob
+	expiryInterval         time.Duration
+	runTimeout             time.Duration
+	metrics                ExpiryMetrics
+	payment                PaymentEventJob
+	paymentInterval        time.Duration
+	paymentTimeout         time.Duration
+	paymentMetrics         PaymentMetrics
+	delivery               DeliveryJob
+	deliveryInterval       time.Duration
+	deliveryTimeout        time.Duration
+	reconciliation         PaymentReconciliationJob
+	reconciliationInterval time.Duration
+	reconciliationTimeout  time.Duration
+}
+
+func (r *Runner) WithPaymentReconciliation(job PaymentReconciliationJob, interval, timeout time.Duration) *Runner {
+	r.reconciliation = job
+	r.reconciliationInterval = interval
+	r.reconciliationTimeout = timeout
+	return r
 }
 
 func (r *Runner) WithPaymentEvents(job PaymentEventJob, interval, timeout time.Duration, metrics PaymentMetrics) *Runner {
@@ -103,11 +119,19 @@ func (r *Runner) Run(ctx context.Context) error {
 		deliveryChannel = deliveryTicker.C
 		defer deliveryTicker.Stop()
 	}
+	var reconciliationTicker *time.Ticker
+	var reconciliationChannel <-chan time.Time
+	if r.reconciliation != nil {
+		reconciliationTicker = time.NewTicker(r.reconciliationInterval)
+		reconciliationChannel = reconciliationTicker.C
+		defer reconciliationTicker.Stop()
+	}
 	defer healthTicker.Stop()
 	defer expiryTicker.Stop()
 	r.runExpiry(ctx)
 	r.runPaymentEvents(ctx)
 	r.runDelivery(ctx)
+	r.runReconciliation(ctx)
 
 	for {
 		select {
@@ -124,8 +148,41 @@ func (r *Runner) Run(ctx context.Context) error {
 			r.runPaymentEvents(ctx)
 		case <-deliveryChannel:
 			r.runDelivery(ctx)
+		case <-reconciliationChannel:
+			r.runReconciliation(ctx)
 		}
 	}
+}
+
+func (r *Runner) runReconciliation(ctx context.Context) {
+	if r.reconciliation == nil {
+		return
+	}
+	started := time.Now()
+	defer func() {
+		if recover() != nil {
+			r.logger.ErrorContext(ctx, "payment reconciliation run panicked", "worker", "payment_reconciliation", "result", "panic")
+		}
+	}()
+	runCtx, cancel := context.WithTimeout(ctx, r.reconciliationTimeout)
+	defer cancel()
+	summary, err := r.reconciliation.RunOnce(runCtx)
+	if err != nil {
+		r.logger.ErrorContext(ctx, "payment reconciliation run degraded",
+			"worker", "payment_reconciliation", "operation", "reconcile_provider_transactions",
+			"result", "failed", "accounts", summary.Accounts, "pages", summary.Pages,
+			"transactions_fetched", summary.Fetched, "events_ingested", summary.Ingested,
+			"duplicates", summary.Duplicates, "duration_ms", time.Since(started).Milliseconds(), "error", err,
+		)
+		return
+	}
+	r.logger.InfoContext(ctx, "payment reconciliation run completed",
+		"worker", "payment_reconciliation", "operation", "reconcile_provider_transactions",
+		"result", "success", "accounts", summary.Accounts, "pages", summary.Pages,
+		"transactions_fetched", summary.Fetched, "events_ingested", summary.Ingested,
+		"duplicates", summary.Duplicates, "skipped", summary.Skipped,
+		"duration_ms", time.Since(started).Milliseconds(),
+	)
 }
 
 func (r *Runner) runDelivery(ctx context.Context) {

@@ -12,7 +12,7 @@ type BankAccountCipher interface {
 }
 
 type BankAccountRepository interface {
-	ListActiveBankAccounts(context.Context) ([]BankAccountOption, error)
+	ListActiveBankAccounts(context.Context, string) ([]BankAccountOption, error)
 	ListAdminBankAccounts(context.Context, int32, int32) ([]RedactedBankAccount, int64, error)
 	CreateBankAccount(context.Context, Admin, AdminSession, CreateBankAccountInput, ProtectedBankAccountNumber) (RedactedBankAccount, error)
 	UpdateBankAccount(context.Context, Admin, AdminSession, UpdateBankAccountInput, ProtectedBankAccountNumber) (RedactedBankAccount, error)
@@ -20,21 +20,29 @@ type BankAccountRepository interface {
 }
 
 type BankAccountService struct {
-	repository BankAccountRepository
-	cipher     BankAccountCipher
-	admin      *AdminService
-	pageSize   int
+	repository         BankAccountRepository
+	cipher             BankAccountCipher
+	admin              *AdminService
+	pageSize           int
+	paymentEnvironment string
 }
 
 func NewBankAccountService(repository BankAccountRepository, cipher BankAccountCipher, admin *AdminService, pageSize int) *BankAccountService {
 	if pageSize <= 0 || pageSize > MaxPageSize {
 		pageSize = DefaultPageSize
 	}
-	return &BankAccountService{repository: repository, cipher: cipher, admin: admin, pageSize: pageSize}
+	return &BankAccountService{repository: repository, cipher: cipher, admin: admin, pageSize: pageSize, paymentEnvironment: "production"}
+}
+
+func (s *BankAccountService) WithPaymentEnvironment(environment string) *BankAccountService {
+	if validPaymentEnvironment(environment) {
+		s.paymentEnvironment = environment
+	}
+	return s
 }
 
 func (s *BankAccountService) ListActive(ctx context.Context) ([]BankAccountOption, error) {
-	items, err := s.repository.ListActiveBankAccounts(ctx)
+	items, err := s.repository.ListActiveBankAccounts(ctx, s.paymentEnvironment)
 	if err != nil {
 		return nil, fmt.Errorf("list active bank accounts: %w", err)
 	}
@@ -56,6 +64,7 @@ func (s *BankAccountService) ListAdmin(ctx context.Context, telegramID int64, pa
 }
 
 func (s *BankAccountService) Create(ctx context.Context, telegramID int64, session AdminSession, input CreateBankAccountInput) (RedactedBankAccount, error) {
+	input.PaymentEnvironment = s.paymentEnvironment
 	normalizeBankInput(&input.BankAccountInput)
 	if err := validateBankInput(input.BankAccountInput); err != nil {
 		return RedactedBankAccount{}, err

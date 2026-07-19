@@ -83,7 +83,8 @@ func run(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("initialize bank account encryption: %w", err)
 	}
-	bankService := app.NewBankAccountService(store, bankCipher, adminService, cfg.BankAccountPageSize)
+	bankService := app.NewBankAccountService(store, bankCipher, adminService, cfg.BankAccountPageSize).
+		WithPaymentEnvironment(cfg.PaymentProviderEnvironment)
 	vietQRGenerator, err := vietqr.New(cfg.VietQRBaseURL, cfg.VietQRTemplate)
 	if err != nil {
 		return fmt.Errorf("initialize VietQR instructions: %w", err)
@@ -95,12 +96,12 @@ func run(ctx context.Context) error {
 	orderService := app.NewOrderService(
 		store, bankCipher, vietQRGenerator, referenceGenerator, cfg.OrderExpiry,
 		cfg.OrderMaxQuantity, cfg.OrderPageSize,
-	)
+	).WithPaymentEnvironment(cfg.PaymentProviderEnvironment)
 	walletService := app.NewWalletService(
 		store, bankCipher, vietQRGenerator, referenceGenerator,
 		domain.Money(cfg.WalletTopupMinAmount), domain.Money(cfg.WalletTopupMaxAmount),
 		cfg.WalletTopupExpiry, app.DefaultPostPaymentReservationTTL, walletMetrics,
-	).WithDeliveryMaxAttempts(cfg.DeliveryMaxAttempts)
+	).WithDeliveryMaxAttempts(cfg.DeliveryMaxAttempts).WithPaymentEnvironment(cfg.PaymentProviderEnvironment)
 	paymentAdminService := app.NewPaymentAdminService(store, cfg.PaymentReviewPageSize, app.DefaultPostPaymentReservationTTL).
 		WithDeliveryMaxAttempts(cfg.DeliveryMaxAttempts)
 	deliveryAdminService := app.NewDeliveryAdminService(store, cfg.DeliveryReviewPageSize).
@@ -123,18 +124,41 @@ func run(ctx context.Context) error {
 		cfg.TelegramWebhookSecret, cfg.TelegramWebhookBodyLimit,
 		cfg.TelegramWebhookTimeout, telegramRouter, telegramMetrics,
 	)
-	providerAdapters := make(map[string]payment.WebhookVerifier, len(cfg.PaymentAllowedProviders))
-	for _, providerName := range cfg.PaymentAllowedProviders {
+	providerAdapters := make([]payment.Provider, 0, len(cfg.PaymentProviders))
+	for _, providerName := range cfg.PaymentProviders {
 		if providerName == payment.SignedJSONProvider {
-			adapter, err := payment.NewSignedJSON(cfg.SignedJSONWebhookSecret, cfg.SignedJSONTimestampTolerance)
+			adapter, err := payment.NewSignedJSONForEnvironment(
+				cfg.SignedJSONWebhookSecret, cfg.SignedJSONTimestampTolerance,
+				payment.ProviderEnvironment(cfg.PaymentProviderEnvironment), true,
+			)
 			if err != nil {
 				return fmt.Errorf("initialize signed payment webhook: %w", err)
 			}
-			providerAdapters[providerName] = adapter
+			providerAdapters = append(providerAdapters, adapter)
 		}
 	}
+	providerRegistry, err := payment.NewProviderRegistry(providerAdapters...)
+	if err != nil {
+		return fmt.Errorf("initialize payment provider registry: %w", err)
+	}
+	providerDescriptors := make([]app.PaymentProviderDescriptor, 0, len(providerRegistry.Providers()))
+	for _, providerAdapter := range providerRegistry.Providers() {
+		capabilities := providerAdapter.Capabilities()
+		providerDescriptors = append(providerDescriptors, app.PaymentProviderDescriptor{
+			Name: string(providerAdapter.Name()), Enabled: providerAdapter.Enabled(),
+			Environment: string(providerAdapter.Environment()),
+			Capabilities: app.PaymentProviderCapabilities{
+				Webhook: capabilities.SupportsWebhook, Reconciliation: capabilities.SupportsReconciliation,
+				TestMode: capabilities.SupportsTestMode,
+			},
+		})
+	}
+	providerAdminService := app.NewPaymentProviderAdminService(
+		store, adminService, providerDescriptors, cfg.PaymentProviderReviewPageSize, paymentMetrics,
+	)
+	telegramRouter.WithPaymentProviderAdministration(providerAdminService)
 	paymentWebhook := httpapi.NewPaymentWebhook(
-		payment.NewRegistry(providerAdapters),
+		providerRegistry,
 		app.NewPaymentEventIngestionService(store, cfg.PaymentEventMaxAttempts),
 		cfg.PaymentWebhookBodyLimit, cfg.PaymentEventRunTimeout, paymentMetrics,
 	)

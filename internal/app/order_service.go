@@ -41,7 +41,7 @@ type OrderTransaction interface {
 	FindOrderByIdempotency(context.Context, int64, string) (OrderDetail, error)
 	GetProductForOrderCreation(context.Context, int64) (OrderProductRecord, error)
 	CountClaimableInventory(context.Context, int64) (int64, error)
-	GetActiveBankAccountForOrder(context.Context, int64) (BankAccountRecord, error)
+	GetActiveBankAccountForOrder(context.Context, int64, string) (BankAccountRecord, error)
 	InsertPendingOrder(context.Context, PendingOrderInsert) (OrderDetail, bool, error)
 	InsertOrderItem(context.Context, int64, OrderItemSnapshot) (OrderItemSnapshot, error)
 	InsertOrderHistory(context.Context, int64, *domain.OrderStatus, domain.OrderStatus, string, string, int64, string) error
@@ -161,7 +161,7 @@ func (s *OrderService) Create(ctx context.Context, command CreateOrderCommand) (
 		if available < int64(command.Quantity) {
 			return ErrInsufficientInventory
 		}
-		bank, err := tx.GetActiveBankAccountForOrder(ctx, command.BankAccountID)
+		bank, err := tx.GetActiveBankAccountForOrder(ctx, command.BankAccountID, s.paymentEnvironment)
 		if err != nil {
 			if errors.Is(err, ErrBankAccountNotFound) || errors.Is(err, ErrNotFound) {
 				return ErrBankAccountInactive

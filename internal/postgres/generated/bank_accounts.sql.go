@@ -27,31 +27,32 @@ INSERT INTO bank_accounts (
     bank_bin, bank_name, display_name, account_name,
     encrypted_account_number, account_number_fingerprint,
     encryption_key_id, encryption_nonce, encryption_format,
-    encryption_key_version, display_last4, sort_order
+    encryption_key_version, display_last4, sort_order, payment_environment
 ) VALUES (
     $1, $2, $3,
     $4, $5,
     $6, $7,
     $8, 'aes-256-gcm-v1',
     $9, $10,
-    $11
+    $11, COALESCE(NULLIF($12, ''), 'production')
 )
 ON CONFLICT (account_number_fingerprint) DO NOTHING
-RETURNING id, bank_bin, bank_name, account_name, encrypted_account_number, account_number_fingerprint, encryption_key_id, display_last4, sort_order, is_active, created_at, updated_at, display_name, encryption_nonce, encryption_format, encryption_key_version, version
+RETURNING id, bank_bin, bank_name, account_name, encrypted_account_number, account_number_fingerprint, encryption_key_id, display_last4, sort_order, is_active, created_at, updated_at, display_name, encryption_nonce, encryption_format, encryption_key_version, version, payment_environment
 `
 
 type CreateEncryptedBankAccountParams struct {
-	BankBin                  string `db:"bank_bin" json:"bank_bin"`
-	BankName                 string `db:"bank_name" json:"bank_name"`
-	DisplayName              string `db:"display_name" json:"display_name"`
-	AccountName              string `db:"account_name" json:"account_name"`
-	EncryptedAccountNumber   []byte `db:"encrypted_account_number" json:"encrypted_account_number"`
-	AccountNumberFingerprint []byte `db:"account_number_fingerprint" json:"account_number_fingerprint"`
-	EncryptionKeyID          string `db:"encryption_key_id" json:"encryption_key_id"`
-	EncryptionNonce          []byte `db:"encryption_nonce" json:"encryption_nonce"`
-	EncryptionKeyVersion     int32  `db:"encryption_key_version" json:"encryption_key_version"`
-	DisplayLast4             string `db:"display_last4" json:"display_last4"`
-	SortOrder                int32  `db:"sort_order" json:"sort_order"`
+	BankBin                  string      `db:"bank_bin" json:"bank_bin"`
+	BankName                 string      `db:"bank_name" json:"bank_name"`
+	DisplayName              string      `db:"display_name" json:"display_name"`
+	AccountName              string      `db:"account_name" json:"account_name"`
+	EncryptedAccountNumber   []byte      `db:"encrypted_account_number" json:"encrypted_account_number"`
+	AccountNumberFingerprint []byte      `db:"account_number_fingerprint" json:"account_number_fingerprint"`
+	EncryptionKeyID          string      `db:"encryption_key_id" json:"encryption_key_id"`
+	EncryptionNonce          []byte      `db:"encryption_nonce" json:"encryption_nonce"`
+	EncryptionKeyVersion     int32       `db:"encryption_key_version" json:"encryption_key_version"`
+	DisplayLast4             string      `db:"display_last4" json:"display_last4"`
+	SortOrder                int32       `db:"sort_order" json:"sort_order"`
+	PaymentEnvironment       interface{} `db:"payment_environment" json:"payment_environment"`
 }
 
 func (q *Queries) CreateEncryptedBankAccount(ctx context.Context, arg CreateEncryptedBankAccountParams) (BankAccount, error) {
@@ -67,6 +68,7 @@ func (q *Queries) CreateEncryptedBankAccount(ctx context.Context, arg CreateEncr
 		arg.EncryptionKeyVersion,
 		arg.DisplayLast4,
 		arg.SortOrder,
+		arg.PaymentEnvironment,
 	)
 	var i BankAccount
 	err := row.Scan(
@@ -87,21 +89,28 @@ func (q *Queries) CreateEncryptedBankAccount(ctx context.Context, arg CreateEncr
 		&i.EncryptionFormat,
 		&i.EncryptionKeyVersion,
 		&i.Version,
+		&i.PaymentEnvironment,
 	)
 	return i, err
 }
 
 const getActiveBankAccountForOrder = `-- name: GetActiveBankAccountForOrder :one
-SELECT id, bank_bin, bank_name, account_name, encrypted_account_number, account_number_fingerprint, encryption_key_id, display_last4, sort_order, is_active, created_at, updated_at, display_name, encryption_nonce, encryption_format, encryption_key_version, version
+SELECT id, bank_bin, bank_name, account_name, encrypted_account_number, account_number_fingerprint, encryption_key_id, display_last4, sort_order, is_active, created_at, updated_at, display_name, encryption_nonce, encryption_format, encryption_key_version, version, payment_environment
 FROM bank_accounts
 WHERE id = $1
   AND is_active = true
+  AND payment_environment = $2
   AND encryption_format = 'aes-256-gcm-v1'
 FOR SHARE
 `
 
-func (q *Queries) GetActiveBankAccountForOrder(ctx context.Context, id int64) (BankAccount, error) {
-	row := q.db.QueryRow(ctx, getActiveBankAccountForOrder, id)
+type GetActiveBankAccountForOrderParams struct {
+	ID                 int64  `db:"id" json:"id"`
+	PaymentEnvironment string `db:"payment_environment" json:"payment_environment"`
+}
+
+func (q *Queries) GetActiveBankAccountForOrder(ctx context.Context, arg GetActiveBankAccountForOrderParams) (BankAccount, error) {
+	row := q.db.QueryRow(ctx, getActiveBankAccountForOrder, arg.ID, arg.PaymentEnvironment)
 	var i BankAccount
 	err := row.Scan(
 		&i.ID,
@@ -121,32 +130,35 @@ func (q *Queries) GetActiveBankAccountForOrder(ctx context.Context, id int64) (B
 		&i.EncryptionFormat,
 		&i.EncryptionKeyVersion,
 		&i.Version,
+		&i.PaymentEnvironment,
 	)
 	return i, err
 }
 
 const listActiveBankAccountOptions = `-- name: ListActiveBankAccountOptions :many
 SELECT id, bank_bin, bank_name, display_name, account_name, display_last4,
-       sort_order, version
+       sort_order, version, payment_environment
 FROM bank_accounts
 WHERE is_active = true
+  AND payment_environment = $1
   AND encryption_format = 'aes-256-gcm-v1'
 ORDER BY sort_order, id
 `
 
 type ListActiveBankAccountOptionsRow struct {
-	ID           int64  `db:"id" json:"id"`
-	BankBin      string `db:"bank_bin" json:"bank_bin"`
-	BankName     string `db:"bank_name" json:"bank_name"`
-	DisplayName  string `db:"display_name" json:"display_name"`
-	AccountName  string `db:"account_name" json:"account_name"`
-	DisplayLast4 string `db:"display_last4" json:"display_last4"`
-	SortOrder    int32  `db:"sort_order" json:"sort_order"`
-	Version      int64  `db:"version" json:"version"`
+	ID                 int64  `db:"id" json:"id"`
+	BankBin            string `db:"bank_bin" json:"bank_bin"`
+	BankName           string `db:"bank_name" json:"bank_name"`
+	DisplayName        string `db:"display_name" json:"display_name"`
+	AccountName        string `db:"account_name" json:"account_name"`
+	DisplayLast4       string `db:"display_last4" json:"display_last4"`
+	SortOrder          int32  `db:"sort_order" json:"sort_order"`
+	Version            int64  `db:"version" json:"version"`
+	PaymentEnvironment string `db:"payment_environment" json:"payment_environment"`
 }
 
-func (q *Queries) ListActiveBankAccountOptions(ctx context.Context) ([]ListActiveBankAccountOptionsRow, error) {
-	rows, err := q.db.Query(ctx, listActiveBankAccountOptions)
+func (q *Queries) ListActiveBankAccountOptions(ctx context.Context, paymentEnvironment string) ([]ListActiveBankAccountOptionsRow, error) {
+	rows, err := q.db.Query(ctx, listActiveBankAccountOptions, paymentEnvironment)
 	if err != nil {
 		return nil, err
 	}
@@ -163,6 +175,7 @@ func (q *Queries) ListActiveBankAccountOptions(ctx context.Context) ([]ListActiv
 			&i.DisplayLast4,
 			&i.SortOrder,
 			&i.Version,
+			&i.PaymentEnvironment,
 		); err != nil {
 			return nil, err
 		}
@@ -177,7 +190,7 @@ func (q *Queries) ListActiveBankAccountOptions(ctx context.Context) ([]ListActiv
 const listAdminBankAccountsPage = `-- name: ListAdminBankAccountsPage :many
 SELECT id, bank_bin, bank_name, display_name, account_name, display_last4,
        sort_order, is_active, encryption_key_version, encryption_format,
-       version, created_at
+       version, created_at, payment_environment
 FROM bank_accounts
 ORDER BY sort_order, id
 LIMIT $2::integer OFFSET $1::integer
@@ -201,6 +214,7 @@ type ListAdminBankAccountsPageRow struct {
 	EncryptionFormat     string             `db:"encryption_format" json:"encryption_format"`
 	Version              int64              `db:"version" json:"version"`
 	CreatedAt            pgtype.Timestamptz `db:"created_at" json:"created_at"`
+	PaymentEnvironment   string             `db:"payment_environment" json:"payment_environment"`
 }
 
 func (q *Queries) ListAdminBankAccountsPage(ctx context.Context, arg ListAdminBankAccountsPageParams) ([]ListAdminBankAccountsPageRow, error) {
@@ -225,6 +239,7 @@ func (q *Queries) ListAdminBankAccountsPage(ctx context.Context, arg ListAdminBa
 			&i.EncryptionFormat,
 			&i.Version,
 			&i.CreatedAt,
+			&i.PaymentEnvironment,
 		); err != nil {
 			return nil, err
 		}
@@ -237,7 +252,7 @@ func (q *Queries) ListAdminBankAccountsPage(ctx context.Context, arg ListAdminBa
 }
 
 const lockBankAccountByID = `-- name: LockBankAccountByID :one
-SELECT id, bank_bin, bank_name, account_name, encrypted_account_number, account_number_fingerprint, encryption_key_id, display_last4, sort_order, is_active, created_at, updated_at, display_name, encryption_nonce, encryption_format, encryption_key_version, version FROM bank_accounts WHERE id = $1 FOR UPDATE
+SELECT id, bank_bin, bank_name, account_name, encrypted_account_number, account_number_fingerprint, encryption_key_id, display_last4, sort_order, is_active, created_at, updated_at, display_name, encryption_nonce, encryption_format, encryption_key_version, version, payment_environment FROM bank_accounts WHERE id = $1 FOR UPDATE
 `
 
 func (q *Queries) LockBankAccountByID(ctx context.Context, id int64) (BankAccount, error) {
@@ -261,6 +276,7 @@ func (q *Queries) LockBankAccountByID(ctx context.Context, id int64) (BankAccoun
 		&i.EncryptionFormat,
 		&i.EncryptionKeyVersion,
 		&i.Version,
+		&i.PaymentEnvironment,
 	)
 	return i, err
 }
@@ -272,7 +288,7 @@ SET is_active = $1,
 WHERE id = $2
   AND version = $3
   AND is_active <> $1
-RETURNING id, bank_bin, bank_name, account_name, encrypted_account_number, account_number_fingerprint, encryption_key_id, display_last4, sort_order, is_active, created_at, updated_at, display_name, encryption_nonce, encryption_format, encryption_key_version, version
+RETURNING id, bank_bin, bank_name, account_name, encrypted_account_number, account_number_fingerprint, encryption_key_id, display_last4, sort_order, is_active, created_at, updated_at, display_name, encryption_nonce, encryption_format, encryption_key_version, version, payment_environment
 `
 
 type SetBankAccountActiveGuardedParams struct {
@@ -302,6 +318,7 @@ func (q *Queries) SetBankAccountActiveGuarded(ctx context.Context, arg SetBankAc
 		&i.EncryptionFormat,
 		&i.EncryptionKeyVersion,
 		&i.Version,
+		&i.PaymentEnvironment,
 	)
 	return i, err
 }
@@ -323,7 +340,7 @@ SET bank_bin = $1,
     version = version + 1
 WHERE id = $12
   AND version = $13
-RETURNING id, bank_bin, bank_name, account_name, encrypted_account_number, account_number_fingerprint, encryption_key_id, display_last4, sort_order, is_active, created_at, updated_at, display_name, encryption_nonce, encryption_format, encryption_key_version, version
+RETURNING id, bank_bin, bank_name, account_name, encrypted_account_number, account_number_fingerprint, encryption_key_id, display_last4, sort_order, is_active, created_at, updated_at, display_name, encryption_nonce, encryption_format, encryption_key_version, version, payment_environment
 `
 
 type UpdateEncryptedBankAccountGuardedParams struct {
@@ -377,6 +394,7 @@ func (q *Queries) UpdateEncryptedBankAccountGuarded(ctx context.Context, arg Upd
 		&i.EncryptionFormat,
 		&i.EncryptionKeyVersion,
 		&i.Version,
+		&i.PaymentEnvironment,
 	)
 	return i, err
 }
