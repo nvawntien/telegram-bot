@@ -11,119 +11,111 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
-const insertPayment = `-- name: InsertPayment :one
-INSERT INTO payments (
-    order_id,
-    user_id,
-    purpose,
-    provider,
-    provider_transaction_id,
-    payment_reference,
-    amount_vnd,
-    currency,
-    status,
-    confirmed_at
-) VALUES (
-    $1,
-    $2,
-    $3,
-    $4,
-    $5,
-    $6,
-    $7,
-    'VND',
-    $8,
-    $9
+const claimPaymentEvents = `-- name: ClaimPaymentEvents :many
+WITH selected AS (
+    SELECT candidate.id
+    FROM payment_events AS candidate
+    WHERE (
+        (candidate.processing_status = 'received' AND candidate.next_attempt_at <= $1)
+        OR (candidate.processing_status = 'processing' AND candidate.processing_started_at <= $2)
+    )
+    AND candidate.attempts < candidate.max_attempts
+    ORDER BY candidate.received_at, candidate.id
+    FOR UPDATE SKIP LOCKED
+    LIMIT $3::integer
 )
-RETURNING id, order_id, user_id, purpose, provider, provider_transaction_id, payment_reference, amount_vnd, currency, status, confirmed_at, created_at, updated_at
+UPDATE payment_events AS event
+SET processing_status = 'processing',
+    attempts = event.attempts + 1,
+    processing_started_at = $1,
+    processed_at = NULL,
+    processing_error = NULL,
+    last_error_code = NULL
+FROM selected
+WHERE event.id = selected.id
+RETURNING event.id, event.provider, event.external_event_id, event.provider_transaction_id, event.event_type, event.payload_hash, event.sanitized_payload, event.signature_verified, event.processing_status, event.processing_error, event.received_at, event.processed_at, event.created_at, event.updated_at, event.attempts, event.max_attempts, event.next_attempt_at, event.processing_started_at, event.last_error_code, event.related_order_id, event.related_wallet_topup_id
 `
 
-type InsertPaymentParams struct {
-	OrderID               pgtype.Int8        `db:"order_id" json:"order_id"`
-	UserID                int64              `db:"user_id" json:"user_id"`
-	Purpose               string             `db:"purpose" json:"purpose"`
-	Provider              string             `db:"provider" json:"provider"`
-	ProviderTransactionID pgtype.Text        `db:"provider_transaction_id" json:"provider_transaction_id"`
-	PaymentReference      string             `db:"payment_reference" json:"payment_reference"`
-	AmountVnd             int64              `db:"amount_vnd" json:"amount_vnd"`
-	Status                string             `db:"status" json:"status"`
-	ConfirmedAt           pgtype.Timestamptz `db:"confirmed_at" json:"confirmed_at"`
+type ClaimPaymentEventsParams struct {
+	ClaimedAt   pgtype.Timestamptz `db:"claimed_at" json:"claimed_at"`
+	StaleBefore pgtype.Timestamptz `db:"stale_before" json:"stale_before"`
+	BatchSize   int32              `db:"batch_size" json:"batch_size"`
 }
 
-func (q *Queries) InsertPayment(ctx context.Context, arg InsertPaymentParams) (Payment, error) {
-	row := q.db.QueryRow(ctx, insertPayment,
-		arg.OrderID,
-		arg.UserID,
-		arg.Purpose,
-		arg.Provider,
-		arg.ProviderTransactionID,
-		arg.PaymentReference,
-		arg.AmountVnd,
-		arg.Status,
-		arg.ConfirmedAt,
-	)
-	var i Payment
-	err := row.Scan(
-		&i.ID,
-		&i.OrderID,
-		&i.UserID,
-		&i.Purpose,
-		&i.Provider,
-		&i.ProviderTransactionID,
-		&i.PaymentReference,
-		&i.AmountVnd,
-		&i.Currency,
-		&i.Status,
-		&i.ConfirmedAt,
-		&i.CreatedAt,
-		&i.UpdatedAt,
-	)
-	return i, err
+func (q *Queries) ClaimPaymentEvents(ctx context.Context, arg ClaimPaymentEventsParams) ([]PaymentEvent, error) {
+	rows, err := q.db.Query(ctx, claimPaymentEvents, arg.ClaimedAt, arg.StaleBefore, arg.BatchSize)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []PaymentEvent{}
+	for rows.Next() {
+		var i PaymentEvent
+		if err := rows.Scan(
+			&i.ID,
+			&i.Provider,
+			&i.ExternalEventID,
+			&i.ProviderTransactionID,
+			&i.EventType,
+			&i.PayloadHash,
+			&i.SanitizedPayload,
+			&i.SignatureVerified,
+			&i.ProcessingStatus,
+			&i.ProcessingError,
+			&i.ReceivedAt,
+			&i.ProcessedAt,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.Attempts,
+			&i.MaxAttempts,
+			&i.NextAttemptAt,
+			&i.ProcessingStartedAt,
+			&i.LastErrorCode,
+			&i.RelatedOrderID,
+			&i.RelatedWalletTopupID,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
-const insertPaymentEvent = `-- name: InsertPaymentEvent :one
-INSERT INTO payment_events (
-    provider,
-    external_event_id,
-    provider_transaction_id,
-    event_type,
-    payload_hash,
-    sanitized_payload,
-    signature_verified,
-    processing_status
-) VALUES (
-    $1,
-    $2,
-    $3,
-    $4,
-    $5,
-    $6,
-    $7,
-    'received'
-)
-ON CONFLICT (provider, external_event_id) DO NOTHING
-RETURNING id, provider, external_event_id, provider_transaction_id, event_type, payload_hash, sanitized_payload, signature_verified, processing_status, processing_error, received_at, processed_at, created_at, updated_at
+const completePaymentEvent = `-- name: CompletePaymentEvent :one
+UPDATE payment_events
+SET processing_status = $1,
+    related_order_id = $2,
+    related_wallet_topup_id = $3,
+    processing_started_at = NULL,
+    processed_at = $4,
+    processing_error = $5,
+    last_error_code = $6
+WHERE id = $7 AND processing_status = 'processing'
+RETURNING id, provider, external_event_id, provider_transaction_id, event_type, payload_hash, sanitized_payload, signature_verified, processing_status, processing_error, received_at, processed_at, created_at, updated_at, attempts, max_attempts, next_attempt_at, processing_started_at, last_error_code, related_order_id, related_wallet_topup_id
 `
 
-type InsertPaymentEventParams struct {
-	Provider              string      `db:"provider" json:"provider"`
-	ExternalEventID       string      `db:"external_event_id" json:"external_event_id"`
-	ProviderTransactionID pgtype.Text `db:"provider_transaction_id" json:"provider_transaction_id"`
-	EventType             string      `db:"event_type" json:"event_type"`
-	PayloadHash           []byte      `db:"payload_hash" json:"payload_hash"`
-	SanitizedPayload      []byte      `db:"sanitized_payload" json:"sanitized_payload"`
-	SignatureVerified     bool        `db:"signature_verified" json:"signature_verified"`
+type CompletePaymentEventParams struct {
+	ProcessingStatus     string             `db:"processing_status" json:"processing_status"`
+	RelatedOrderID       pgtype.Int8        `db:"related_order_id" json:"related_order_id"`
+	RelatedWalletTopupID pgtype.Int8        `db:"related_wallet_topup_id" json:"related_wallet_topup_id"`
+	ProcessedAt          pgtype.Timestamptz `db:"processed_at" json:"processed_at"`
+	ProcessingError      pgtype.Text        `db:"processing_error" json:"processing_error"`
+	LastErrorCode        pgtype.Text        `db:"last_error_code" json:"last_error_code"`
+	ID                   int64              `db:"id" json:"id"`
 }
 
-func (q *Queries) InsertPaymentEvent(ctx context.Context, arg InsertPaymentEventParams) (PaymentEvent, error) {
-	row := q.db.QueryRow(ctx, insertPaymentEvent,
-		arg.Provider,
-		arg.ExternalEventID,
-		arg.ProviderTransactionID,
-		arg.EventType,
-		arg.PayloadHash,
-		arg.SanitizedPayload,
-		arg.SignatureVerified,
+func (q *Queries) CompletePaymentEvent(ctx context.Context, arg CompletePaymentEventParams) (PaymentEvent, error) {
+	row := q.db.QueryRow(ctx, completePaymentEvent,
+		arg.ProcessingStatus,
+		arg.RelatedOrderID,
+		arg.RelatedWalletTopupID,
+		arg.ProcessedAt,
+		arg.ProcessingError,
+		arg.LastErrorCode,
+		arg.ID,
 	)
 	var i PaymentEvent
 	err := row.Scan(
@@ -141,6 +133,581 @@ func (q *Queries) InsertPaymentEvent(ctx context.Context, arg InsertPaymentEvent
 		&i.ProcessedAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.Attempts,
+		&i.MaxAttempts,
+		&i.NextAttemptAt,
+		&i.ProcessingStartedAt,
+		&i.LastErrorCode,
+		&i.RelatedOrderID,
+		&i.RelatedWalletTopupID,
+	)
+	return i, err
+}
+
+const countOpenPaymentReviews = `-- name: CountOpenPaymentReviews :one
+SELECT count(*)::bigint FROM payment_review_cases WHERE status IN ('open', 'held')
+`
+
+func (q *Queries) CountOpenPaymentReviews(ctx context.Context) (int64, error) {
+	row := q.db.QueryRow(ctx, countOpenPaymentReviews)
+	var column_1 int64
+	err := row.Scan(&column_1)
+	return column_1, err
+}
+
+const getPaymentAllocation = `-- name: GetPaymentAllocation :one
+SELECT id, payment_id, target_type, target_id, amount_vnd, created_at FROM payment_allocations WHERE payment_id = $1
+`
+
+func (q *Queries) GetPaymentAllocation(ctx context.Context, paymentID int64) (PaymentAllocation, error) {
+	row := q.db.QueryRow(ctx, getPaymentAllocation, paymentID)
+	var i PaymentAllocation
+	err := row.Scan(
+		&i.ID,
+		&i.PaymentID,
+		&i.TargetType,
+		&i.TargetID,
+		&i.AmountVnd,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
+const getPaymentByProviderTransaction = `-- name: GetPaymentByProviderTransaction :one
+SELECT id, order_id, user_id, purpose, provider, provider_transaction_id, payment_reference, amount_vnd, currency, status, confirmed_at, created_at, updated_at, occurred_at FROM payments
+WHERE provider = $1 AND provider_transaction_id = $2
+`
+
+type GetPaymentByProviderTransactionParams struct {
+	Provider              string      `db:"provider" json:"provider"`
+	ProviderTransactionID pgtype.Text `db:"provider_transaction_id" json:"provider_transaction_id"`
+}
+
+func (q *Queries) GetPaymentByProviderTransaction(ctx context.Context, arg GetPaymentByProviderTransactionParams) (Payment, error) {
+	row := q.db.QueryRow(ctx, getPaymentByProviderTransaction, arg.Provider, arg.ProviderTransactionID)
+	var i Payment
+	err := row.Scan(
+		&i.ID,
+		&i.OrderID,
+		&i.UserID,
+		&i.Purpose,
+		&i.Provider,
+		&i.ProviderTransactionID,
+		&i.PaymentReference,
+		&i.AmountVnd,
+		&i.Currency,
+		&i.Status,
+		&i.ConfirmedAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.OccurredAt,
+	)
+	return i, err
+}
+
+const getPaymentEventByID = `-- name: GetPaymentEventByID :one
+SELECT id, provider, external_event_id, provider_transaction_id, event_type, payload_hash, sanitized_payload, signature_verified, processing_status, processing_error, received_at, processed_at, created_at, updated_at, attempts, max_attempts, next_attempt_at, processing_started_at, last_error_code, related_order_id, related_wallet_topup_id FROM payment_events WHERE id = $1
+`
+
+func (q *Queries) GetPaymentEventByID(ctx context.Context, id int64) (PaymentEvent, error) {
+	row := q.db.QueryRow(ctx, getPaymentEventByID, id)
+	var i PaymentEvent
+	err := row.Scan(
+		&i.ID,
+		&i.Provider,
+		&i.ExternalEventID,
+		&i.ProviderTransactionID,
+		&i.EventType,
+		&i.PayloadHash,
+		&i.SanitizedPayload,
+		&i.SignatureVerified,
+		&i.ProcessingStatus,
+		&i.ProcessingError,
+		&i.ReceivedAt,
+		&i.ProcessedAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.Attempts,
+		&i.MaxAttempts,
+		&i.NextAttemptAt,
+		&i.ProcessingStartedAt,
+		&i.LastErrorCode,
+		&i.RelatedOrderID,
+		&i.RelatedWalletTopupID,
+	)
+	return i, err
+}
+
+const getPaymentEventByProviderEventID = `-- name: GetPaymentEventByProviderEventID :one
+SELECT id, provider, external_event_id, provider_transaction_id, event_type, payload_hash, sanitized_payload, signature_verified, processing_status, processing_error, received_at, processed_at, created_at, updated_at, attempts, max_attempts, next_attempt_at, processing_started_at, last_error_code, related_order_id, related_wallet_topup_id FROM payment_events
+WHERE provider = $1 AND external_event_id = $2
+`
+
+type GetPaymentEventByProviderEventIDParams struct {
+	Provider        string `db:"provider" json:"provider"`
+	ExternalEventID string `db:"external_event_id" json:"external_event_id"`
+}
+
+func (q *Queries) GetPaymentEventByProviderEventID(ctx context.Context, arg GetPaymentEventByProviderEventIDParams) (PaymentEvent, error) {
+	row := q.db.QueryRow(ctx, getPaymentEventByProviderEventID, arg.Provider, arg.ExternalEventID)
+	var i PaymentEvent
+	err := row.Scan(
+		&i.ID,
+		&i.Provider,
+		&i.ExternalEventID,
+		&i.ProviderTransactionID,
+		&i.EventType,
+		&i.PayloadHash,
+		&i.SanitizedPayload,
+		&i.SignatureVerified,
+		&i.ProcessingStatus,
+		&i.ProcessingError,
+		&i.ReceivedAt,
+		&i.ProcessedAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.Attempts,
+		&i.MaxAttempts,
+		&i.NextAttemptAt,
+		&i.ProcessingStartedAt,
+		&i.LastErrorCode,
+		&i.RelatedOrderID,
+		&i.RelatedWalletTopupID,
+	)
+	return i, err
+}
+
+const insertPayment = `-- name: InsertPayment :one
+INSERT INTO payments (
+    order_id,
+    user_id,
+    purpose,
+    provider,
+    provider_transaction_id,
+    payment_reference,
+    amount_vnd,
+    currency,
+    status,
+    confirmed_at,
+    occurred_at
+) VALUES (
+    $1,
+    $2,
+    $3,
+    $4,
+    $5,
+    $6,
+    $7,
+    'VND',
+    $8,
+    $9,
+    $10
+)
+RETURNING id, order_id, user_id, purpose, provider, provider_transaction_id, payment_reference, amount_vnd, currency, status, confirmed_at, created_at, updated_at, occurred_at
+`
+
+type InsertPaymentParams struct {
+	OrderID               pgtype.Int8        `db:"order_id" json:"order_id"`
+	UserID                int64              `db:"user_id" json:"user_id"`
+	Purpose               string             `db:"purpose" json:"purpose"`
+	Provider              string             `db:"provider" json:"provider"`
+	ProviderTransactionID pgtype.Text        `db:"provider_transaction_id" json:"provider_transaction_id"`
+	PaymentReference      string             `db:"payment_reference" json:"payment_reference"`
+	AmountVnd             int64              `db:"amount_vnd" json:"amount_vnd"`
+	Status                string             `db:"status" json:"status"`
+	ConfirmedAt           pgtype.Timestamptz `db:"confirmed_at" json:"confirmed_at"`
+	OccurredAt            pgtype.Timestamptz `db:"occurred_at" json:"occurred_at"`
+}
+
+func (q *Queries) InsertPayment(ctx context.Context, arg InsertPaymentParams) (Payment, error) {
+	row := q.db.QueryRow(ctx, insertPayment,
+		arg.OrderID,
+		arg.UserID,
+		arg.Purpose,
+		arg.Provider,
+		arg.ProviderTransactionID,
+		arg.PaymentReference,
+		arg.AmountVnd,
+		arg.Status,
+		arg.ConfirmedAt,
+		arg.OccurredAt,
+	)
+	var i Payment
+	err := row.Scan(
+		&i.ID,
+		&i.OrderID,
+		&i.UserID,
+		&i.Purpose,
+		&i.Provider,
+		&i.ProviderTransactionID,
+		&i.PaymentReference,
+		&i.AmountVnd,
+		&i.Currency,
+		&i.Status,
+		&i.ConfirmedAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.OccurredAt,
+	)
+	return i, err
+}
+
+const insertPaymentAllocation = `-- name: InsertPaymentAllocation :one
+INSERT INTO payment_allocations (payment_id, target_type, target_id, amount_vnd)
+VALUES ($1, $2, $3, $4)
+RETURNING id, payment_id, target_type, target_id, amount_vnd, created_at
+`
+
+type InsertPaymentAllocationParams struct {
+	PaymentID  int64  `db:"payment_id" json:"payment_id"`
+	TargetType string `db:"target_type" json:"target_type"`
+	TargetID   int64  `db:"target_id" json:"target_id"`
+	AmountVnd  int64  `db:"amount_vnd" json:"amount_vnd"`
+}
+
+func (q *Queries) InsertPaymentAllocation(ctx context.Context, arg InsertPaymentAllocationParams) (PaymentAllocation, error) {
+	row := q.db.QueryRow(ctx, insertPaymentAllocation,
+		arg.PaymentID,
+		arg.TargetType,
+		arg.TargetID,
+		arg.AmountVnd,
+	)
+	var i PaymentAllocation
+	err := row.Scan(
+		&i.ID,
+		&i.PaymentID,
+		&i.TargetType,
+		&i.TargetID,
+		&i.AmountVnd,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
+const insertPaymentEvent = `-- name: InsertPaymentEvent :one
+INSERT INTO payment_events (
+    provider,
+    external_event_id,
+    provider_transaction_id,
+    event_type,
+    payload_hash,
+    sanitized_payload,
+    signature_verified,
+    processing_status,
+    max_attempts
+) VALUES (
+    $1,
+    $2,
+    $3,
+    $4,
+    $5,
+    $6,
+    $7,
+    'received',
+    $8
+)
+ON CONFLICT (provider, external_event_id) DO NOTHING
+RETURNING id, provider, external_event_id, provider_transaction_id, event_type, payload_hash, sanitized_payload, signature_verified, processing_status, processing_error, received_at, processed_at, created_at, updated_at, attempts, max_attempts, next_attempt_at, processing_started_at, last_error_code, related_order_id, related_wallet_topup_id
+`
+
+type InsertPaymentEventParams struct {
+	Provider              string      `db:"provider" json:"provider"`
+	ExternalEventID       string      `db:"external_event_id" json:"external_event_id"`
+	ProviderTransactionID pgtype.Text `db:"provider_transaction_id" json:"provider_transaction_id"`
+	EventType             string      `db:"event_type" json:"event_type"`
+	PayloadHash           []byte      `db:"payload_hash" json:"payload_hash"`
+	SanitizedPayload      []byte      `db:"sanitized_payload" json:"sanitized_payload"`
+	SignatureVerified     bool        `db:"signature_verified" json:"signature_verified"`
+	MaxAttempts           int32       `db:"max_attempts" json:"max_attempts"`
+}
+
+func (q *Queries) InsertPaymentEvent(ctx context.Context, arg InsertPaymentEventParams) (PaymentEvent, error) {
+	row := q.db.QueryRow(ctx, insertPaymentEvent,
+		arg.Provider,
+		arg.ExternalEventID,
+		arg.ProviderTransactionID,
+		arg.EventType,
+		arg.PayloadHash,
+		arg.SanitizedPayload,
+		arg.SignatureVerified,
+		arg.MaxAttempts,
+	)
+	var i PaymentEvent
+	err := row.Scan(
+		&i.ID,
+		&i.Provider,
+		&i.ExternalEventID,
+		&i.ProviderTransactionID,
+		&i.EventType,
+		&i.PayloadHash,
+		&i.SanitizedPayload,
+		&i.SignatureVerified,
+		&i.ProcessingStatus,
+		&i.ProcessingError,
+		&i.ReceivedAt,
+		&i.ProcessedAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.Attempts,
+		&i.MaxAttempts,
+		&i.NextAttemptAt,
+		&i.ProcessingStartedAt,
+		&i.LastErrorCode,
+		&i.RelatedOrderID,
+		&i.RelatedWalletTopupID,
+	)
+	return i, err
+}
+
+const insertPaymentReviewCase = `-- name: InsertPaymentReviewCase :one
+INSERT INTO payment_review_cases (
+    payment_event_id, payment_id, order_id, wallet_topup_id,
+    provider, provider_transaction_id, payment_reference, amount_vnd,
+    currency, occurred_at, reason
+) VALUES (
+    $1, $2, $3,
+    $4, $5, $6,
+    $7, $8, $9,
+    $10, $11
+)
+ON CONFLICT (payment_event_id) DO UPDATE SET reason = EXCLUDED.reason
+RETURNING id, payment_event_id, payment_id, order_id, wallet_topup_id, provider, provider_transaction_id, payment_reference, amount_vnd, currency, occurred_at, reason, status, resolution_note, resolved_by_admin_id, resolved_at, created_at, updated_at
+`
+
+type InsertPaymentReviewCaseParams struct {
+	PaymentEventID        pgtype.Int8        `db:"payment_event_id" json:"payment_event_id"`
+	PaymentID             pgtype.Int8        `db:"payment_id" json:"payment_id"`
+	OrderID               pgtype.Int8        `db:"order_id" json:"order_id"`
+	WalletTopupID         pgtype.Int8        `db:"wallet_topup_id" json:"wallet_topup_id"`
+	Provider              string             `db:"provider" json:"provider"`
+	ProviderTransactionID pgtype.Text        `db:"provider_transaction_id" json:"provider_transaction_id"`
+	PaymentReference      string             `db:"payment_reference" json:"payment_reference"`
+	AmountVnd             int64              `db:"amount_vnd" json:"amount_vnd"`
+	Currency              string             `db:"currency" json:"currency"`
+	OccurredAt            pgtype.Timestamptz `db:"occurred_at" json:"occurred_at"`
+	Reason                string             `db:"reason" json:"reason"`
+}
+
+func (q *Queries) InsertPaymentReviewCase(ctx context.Context, arg InsertPaymentReviewCaseParams) (PaymentReviewCase, error) {
+	row := q.db.QueryRow(ctx, insertPaymentReviewCase,
+		arg.PaymentEventID,
+		arg.PaymentID,
+		arg.OrderID,
+		arg.WalletTopupID,
+		arg.Provider,
+		arg.ProviderTransactionID,
+		arg.PaymentReference,
+		arg.AmountVnd,
+		arg.Currency,
+		arg.OccurredAt,
+		arg.Reason,
+	)
+	var i PaymentReviewCase
+	err := row.Scan(
+		&i.ID,
+		&i.PaymentEventID,
+		&i.PaymentID,
+		&i.OrderID,
+		&i.WalletTopupID,
+		&i.Provider,
+		&i.ProviderTransactionID,
+		&i.PaymentReference,
+		&i.AmountVnd,
+		&i.Currency,
+		&i.OccurredAt,
+		&i.Reason,
+		&i.Status,
+		&i.ResolutionNote,
+		&i.ResolvedByAdminID,
+		&i.ResolvedAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const listOpenPaymentReviews = `-- name: ListOpenPaymentReviews :many
+SELECT id, payment_event_id, payment_id, order_id, wallet_topup_id, provider, provider_transaction_id, payment_reference, amount_vnd, currency, occurred_at, reason, status, resolution_note, resolved_by_admin_id, resolved_at, created_at, updated_at FROM payment_review_cases
+WHERE status IN ('open', 'held')
+ORDER BY created_at, id
+LIMIT $2::integer OFFSET $1::integer
+`
+
+type ListOpenPaymentReviewsParams struct {
+	PageOffset int32 `db:"page_offset" json:"page_offset"`
+	PageLimit  int32 `db:"page_limit" json:"page_limit"`
+}
+
+func (q *Queries) ListOpenPaymentReviews(ctx context.Context, arg ListOpenPaymentReviewsParams) ([]PaymentReviewCase, error) {
+	rows, err := q.db.Query(ctx, listOpenPaymentReviews, arg.PageOffset, arg.PageLimit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []PaymentReviewCase{}
+	for rows.Next() {
+		var i PaymentReviewCase
+		if err := rows.Scan(
+			&i.ID,
+			&i.PaymentEventID,
+			&i.PaymentID,
+			&i.OrderID,
+			&i.WalletTopupID,
+			&i.Provider,
+			&i.ProviderTransactionID,
+			&i.PaymentReference,
+			&i.AmountVnd,
+			&i.Currency,
+			&i.OccurredAt,
+			&i.Reason,
+			&i.Status,
+			&i.ResolutionNote,
+			&i.ResolvedByAdminID,
+			&i.ResolvedAt,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const lockPaymentEvent = `-- name: LockPaymentEvent :one
+SELECT id, provider, external_event_id, provider_transaction_id, event_type, payload_hash, sanitized_payload, signature_verified, processing_status, processing_error, received_at, processed_at, created_at, updated_at, attempts, max_attempts, next_attempt_at, processing_started_at, last_error_code, related_order_id, related_wallet_topup_id FROM payment_events WHERE id = $1 FOR UPDATE
+`
+
+func (q *Queries) LockPaymentEvent(ctx context.Context, id int64) (PaymentEvent, error) {
+	row := q.db.QueryRow(ctx, lockPaymentEvent, id)
+	var i PaymentEvent
+	err := row.Scan(
+		&i.ID,
+		&i.Provider,
+		&i.ExternalEventID,
+		&i.ProviderTransactionID,
+		&i.EventType,
+		&i.PayloadHash,
+		&i.SanitizedPayload,
+		&i.SignatureVerified,
+		&i.ProcessingStatus,
+		&i.ProcessingError,
+		&i.ReceivedAt,
+		&i.ProcessedAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.Attempts,
+		&i.MaxAttempts,
+		&i.NextAttemptAt,
+		&i.ProcessingStartedAt,
+		&i.LastErrorCode,
+		&i.RelatedOrderID,
+		&i.RelatedWalletTopupID,
+	)
+	return i, err
+}
+
+const resolvePaymentReview = `-- name: ResolvePaymentReview :one
+UPDATE payment_review_cases
+SET status = $1, resolution_note = $2,
+    resolved_by_admin_id = CASE WHEN $1::text = 'resolved' THEN $3 ELSE NULL END,
+    resolved_at = CASE WHEN $1::text = 'resolved' THEN clock_timestamp() ELSE NULL END
+WHERE id = $4 AND status IN ('open', 'held')
+RETURNING id, payment_event_id, payment_id, order_id, wallet_topup_id, provider, provider_transaction_id, payment_reference, amount_vnd, currency, occurred_at, reason, status, resolution_note, resolved_by_admin_id, resolved_at, created_at, updated_at
+`
+
+type ResolvePaymentReviewParams struct {
+	Status         string      `db:"status" json:"status"`
+	ResolutionNote pgtype.Text `db:"resolution_note" json:"resolution_note"`
+	AdminID        pgtype.Int8 `db:"admin_id" json:"admin_id"`
+	ID             int64       `db:"id" json:"id"`
+}
+
+func (q *Queries) ResolvePaymentReview(ctx context.Context, arg ResolvePaymentReviewParams) (PaymentReviewCase, error) {
+	row := q.db.QueryRow(ctx, resolvePaymentReview,
+		arg.Status,
+		arg.ResolutionNote,
+		arg.AdminID,
+		arg.ID,
+	)
+	var i PaymentReviewCase
+	err := row.Scan(
+		&i.ID,
+		&i.PaymentEventID,
+		&i.PaymentID,
+		&i.OrderID,
+		&i.WalletTopupID,
+		&i.Provider,
+		&i.ProviderTransactionID,
+		&i.PaymentReference,
+		&i.AmountVnd,
+		&i.Currency,
+		&i.OccurredAt,
+		&i.Reason,
+		&i.Status,
+		&i.ResolutionNote,
+		&i.ResolvedByAdminID,
+		&i.ResolvedAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const schedulePaymentEventRetry = `-- name: SchedulePaymentEventRetry :one
+UPDATE payment_events
+SET processing_status = CASE WHEN attempts >= max_attempts THEN 'failed' ELSE 'received' END,
+    next_attempt_at = $1,
+    processing_started_at = NULL,
+    processed_at = CASE WHEN attempts >= max_attempts THEN $2 ELSE NULL END,
+    processing_error = $3,
+    last_error_code = $4
+WHERE id = $5 AND processing_status = 'processing'
+RETURNING id, provider, external_event_id, provider_transaction_id, event_type, payload_hash, sanitized_payload, signature_verified, processing_status, processing_error, received_at, processed_at, created_at, updated_at, attempts, max_attempts, next_attempt_at, processing_started_at, last_error_code, related_order_id, related_wallet_topup_id
+`
+
+type SchedulePaymentEventRetryParams struct {
+	NextAttemptAt   pgtype.Timestamptz `db:"next_attempt_at" json:"next_attempt_at"`
+	ProcessedAt     pgtype.Timestamptz `db:"processed_at" json:"processed_at"`
+	ProcessingError pgtype.Text        `db:"processing_error" json:"processing_error"`
+	LastErrorCode   pgtype.Text        `db:"last_error_code" json:"last_error_code"`
+	ID              int64              `db:"id" json:"id"`
+}
+
+func (q *Queries) SchedulePaymentEventRetry(ctx context.Context, arg SchedulePaymentEventRetryParams) (PaymentEvent, error) {
+	row := q.db.QueryRow(ctx, schedulePaymentEventRetry,
+		arg.NextAttemptAt,
+		arg.ProcessedAt,
+		arg.ProcessingError,
+		arg.LastErrorCode,
+		arg.ID,
+	)
+	var i PaymentEvent
+	err := row.Scan(
+		&i.ID,
+		&i.Provider,
+		&i.ExternalEventID,
+		&i.ProviderTransactionID,
+		&i.EventType,
+		&i.PayloadHash,
+		&i.SanitizedPayload,
+		&i.SignatureVerified,
+		&i.ProcessingStatus,
+		&i.ProcessingError,
+		&i.ReceivedAt,
+		&i.ProcessedAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.Attempts,
+		&i.MaxAttempts,
+		&i.NextAttemptAt,
+		&i.ProcessingStartedAt,
+		&i.LastErrorCode,
+		&i.RelatedOrderID,
+		&i.RelatedWalletTopupID,
 	)
 	return i, err
 }

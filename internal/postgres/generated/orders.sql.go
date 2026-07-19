@@ -813,6 +813,93 @@ func (q *Queries) ListOrdersOwnedByTelegramUser(ctx context.Context, arg ListOrd
 	return items, nil
 }
 
+const lockOrderByPaymentReference = `-- name: LockOrderByPaymentReference :one
+SELECT orders.id, orders.user_id, orders.status, orders.currency, orders.subtotal_vnd, orders.total_vnd, orders.payment_reference, orders.idempotency_key, orders.expires_at, orders.paid_at, orders.delivery_started_at, orders.delivered_at, orders.cancelled_at, orders.version, orders.created_at, orders.updated_at, orders.bank_account_id, orders.bank_bin_snapshot, orders.bank_name_snapshot, orders.bank_display_name_snapshot, orders.bank_account_name_snapshot, orders.encrypted_account_number_snapshot, orders.account_number_nonce_snapshot, orders.account_encryption_format_snapshot, orders.account_key_version_snapshot, orders.account_last4_snapshot, item.id AS order_item_id, item.product_id,
+       item.product_name, item.unit_price_vnd, item.quantity,
+       item.line_total_vnd
+FROM orders
+JOIN LATERAL (
+    SELECT id, order_id, product_id, product_name, unit_price_vnd, quantity, line_total_vnd, created_at FROM order_items WHERE order_id = orders.id ORDER BY id LIMIT 1
+) AS item ON true
+WHERE orders.payment_reference = $1
+FOR UPDATE OF orders
+`
+
+type LockOrderByPaymentReferenceRow struct {
+	ID                              int64              `db:"id" json:"id"`
+	UserID                          int64              `db:"user_id" json:"user_id"`
+	Status                          string             `db:"status" json:"status"`
+	Currency                        string             `db:"currency" json:"currency"`
+	SubtotalVnd                     int64              `db:"subtotal_vnd" json:"subtotal_vnd"`
+	TotalVnd                        int64              `db:"total_vnd" json:"total_vnd"`
+	PaymentReference                string             `db:"payment_reference" json:"payment_reference"`
+	IdempotencyKey                  string             `db:"idempotency_key" json:"idempotency_key"`
+	ExpiresAt                       pgtype.Timestamptz `db:"expires_at" json:"expires_at"`
+	PaidAt                          pgtype.Timestamptz `db:"paid_at" json:"paid_at"`
+	DeliveryStartedAt               pgtype.Timestamptz `db:"delivery_started_at" json:"delivery_started_at"`
+	DeliveredAt                     pgtype.Timestamptz `db:"delivered_at" json:"delivered_at"`
+	CancelledAt                     pgtype.Timestamptz `db:"cancelled_at" json:"cancelled_at"`
+	Version                         int64              `db:"version" json:"version"`
+	CreatedAt                       pgtype.Timestamptz `db:"created_at" json:"created_at"`
+	UpdatedAt                       pgtype.Timestamptz `db:"updated_at" json:"updated_at"`
+	BankAccountID                   pgtype.Int8        `db:"bank_account_id" json:"bank_account_id"`
+	BankBinSnapshot                 pgtype.Text        `db:"bank_bin_snapshot" json:"bank_bin_snapshot"`
+	BankNameSnapshot                pgtype.Text        `db:"bank_name_snapshot" json:"bank_name_snapshot"`
+	BankDisplayNameSnapshot         pgtype.Text        `db:"bank_display_name_snapshot" json:"bank_display_name_snapshot"`
+	BankAccountNameSnapshot         pgtype.Text        `db:"bank_account_name_snapshot" json:"bank_account_name_snapshot"`
+	EncryptedAccountNumberSnapshot  []byte             `db:"encrypted_account_number_snapshot" json:"encrypted_account_number_snapshot"`
+	AccountNumberNonceSnapshot      []byte             `db:"account_number_nonce_snapshot" json:"account_number_nonce_snapshot"`
+	AccountEncryptionFormatSnapshot pgtype.Text        `db:"account_encryption_format_snapshot" json:"account_encryption_format_snapshot"`
+	AccountKeyVersionSnapshot       pgtype.Int4        `db:"account_key_version_snapshot" json:"account_key_version_snapshot"`
+	AccountLast4Snapshot            pgtype.Text        `db:"account_last4_snapshot" json:"account_last4_snapshot"`
+	OrderItemID                     int64              `db:"order_item_id" json:"order_item_id"`
+	ProductID                       int64              `db:"product_id" json:"product_id"`
+	ProductName                     string             `db:"product_name" json:"product_name"`
+	UnitPriceVnd                    int64              `db:"unit_price_vnd" json:"unit_price_vnd"`
+	Quantity                        int32              `db:"quantity" json:"quantity"`
+	LineTotalVnd                    int64              `db:"line_total_vnd" json:"line_total_vnd"`
+}
+
+func (q *Queries) LockOrderByPaymentReference(ctx context.Context, paymentReference string) (LockOrderByPaymentReferenceRow, error) {
+	row := q.db.QueryRow(ctx, lockOrderByPaymentReference, paymentReference)
+	var i LockOrderByPaymentReferenceRow
+	err := row.Scan(
+		&i.ID,
+		&i.UserID,
+		&i.Status,
+		&i.Currency,
+		&i.SubtotalVnd,
+		&i.TotalVnd,
+		&i.PaymentReference,
+		&i.IdempotencyKey,
+		&i.ExpiresAt,
+		&i.PaidAt,
+		&i.DeliveryStartedAt,
+		&i.DeliveredAt,
+		&i.CancelledAt,
+		&i.Version,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.BankAccountID,
+		&i.BankBinSnapshot,
+		&i.BankNameSnapshot,
+		&i.BankDisplayNameSnapshot,
+		&i.BankAccountNameSnapshot,
+		&i.EncryptedAccountNumberSnapshot,
+		&i.AccountNumberNonceSnapshot,
+		&i.AccountEncryptionFormatSnapshot,
+		&i.AccountKeyVersionSnapshot,
+		&i.AccountLast4Snapshot,
+		&i.OrderItemID,
+		&i.ProductID,
+		&i.ProductName,
+		&i.UnitPriceVnd,
+		&i.Quantity,
+		&i.LineTotalVnd,
+	)
+	return i, err
+}
+
 const lockOrderDetailOwnedByTelegramUser = `-- name: LockOrderDetailOwnedByTelegramUser :one
 SELECT orders.id, orders.user_id, orders.status, orders.currency, orders.subtotal_vnd, orders.total_vnd, orders.payment_reference, orders.idempotency_key, orders.expires_at, orders.paid_at, orders.delivery_started_at, orders.delivered_at, orders.cancelled_at, orders.version, orders.created_at, orders.updated_at, orders.bank_account_id, orders.bank_bin_snapshot, orders.bank_name_snapshot, orders.bank_display_name_snapshot, orders.bank_account_name_snapshot, orders.encrypted_account_number_snapshot, orders.account_number_nonce_snapshot, orders.account_encryption_format_snapshot, orders.account_key_version_snapshot, orders.account_last4_snapshot, item.id AS order_item_id, item.product_id,
        item.product_name, item.unit_price_vnd, item.quantity,

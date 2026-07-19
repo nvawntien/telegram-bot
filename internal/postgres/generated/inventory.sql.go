@@ -70,6 +70,64 @@ func (q *Queries) ClaimAvailableInventory(ctx context.Context, arg ClaimAvailabl
 	return items, nil
 }
 
+const claimExactAvailableInventory = `-- name: ClaimExactAvailableInventory :many
+WITH selected_items AS (
+    SELECT available.id
+    FROM inventory_items AS available
+    WHERE available.product_id = $3
+      AND available.status = 'available'
+      AND available.encryption_format = 'aes-256-gcm-v1'
+      AND NOT EXISTS (
+          SELECT 1 FROM order_inventory_items AS mapping
+          WHERE mapping.inventory_item_id = available.id AND mapping.status = 'active'
+      )
+    ORDER BY available.created_at, available.id
+    FOR UPDATE SKIP LOCKED
+    LIMIT $4::integer
+), exact_set AS (
+    SELECT id FROM selected_items
+    WHERE (SELECT count(*) FROM selected_items) = $4::integer
+)
+UPDATE inventory_items AS inventory
+SET status = 'reserved', reserved_order_id = $1,
+    reserved_until = $2, version = version + 1
+FROM exact_set
+WHERE inventory.id = exact_set.id
+RETURNING inventory.id
+`
+
+type ClaimExactAvailableInventoryParams struct {
+	OrderID       pgtype.Int8        `db:"order_id" json:"order_id"`
+	ReservedUntil pgtype.Timestamptz `db:"reserved_until" json:"reserved_until"`
+	ProductID     int64              `db:"product_id" json:"product_id"`
+	Quantity      int32              `db:"quantity" json:"quantity"`
+}
+
+func (q *Queries) ClaimExactAvailableInventory(ctx context.Context, arg ClaimExactAvailableInventoryParams) ([]int64, error) {
+	rows, err := q.db.Query(ctx, claimExactAvailableInventory,
+		arg.OrderID,
+		arg.ReservedUntil,
+		arg.ProductID,
+		arg.Quantity,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []int64{}
+	for rows.Next() {
+		var id int64
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		items = append(items, id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const countActiveInventoryMappingsByOrder = `-- name: CountActiveInventoryMappingsByOrder :one
 SELECT count(*)::bigint
 FROM order_inventory_items

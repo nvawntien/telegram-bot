@@ -132,6 +132,31 @@ FROM selected_items
 WHERE inventory.id = selected_items.id
 RETURNING inventory.id;
 
+-- name: ClaimExactAvailableInventory :many
+WITH selected_items AS (
+    SELECT available.id
+    FROM inventory_items AS available
+    WHERE available.product_id = sqlc.arg(product_id)
+      AND available.status = 'available'
+      AND available.encryption_format = 'aes-256-gcm-v1'
+      AND NOT EXISTS (
+          SELECT 1 FROM order_inventory_items AS mapping
+          WHERE mapping.inventory_item_id = available.id AND mapping.status = 'active'
+      )
+    ORDER BY available.created_at, available.id
+    FOR UPDATE SKIP LOCKED
+    LIMIT sqlc.arg(quantity)::integer
+), exact_set AS (
+    SELECT id FROM selected_items
+    WHERE (SELECT count(*) FROM selected_items) = sqlc.arg(quantity)::integer
+)
+UPDATE inventory_items AS inventory
+SET status = 'reserved', reserved_order_id = sqlc.arg(order_id),
+    reserved_until = sqlc.arg(reserved_until), version = version + 1
+FROM exact_set
+WHERE inventory.id = exact_set.id
+RETURNING inventory.id;
+
 -- name: LockOrderItemForInventory :one
 SELECT *
 FROM order_items

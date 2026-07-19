@@ -78,6 +78,17 @@ WHERE user_id = sqlc.arg(user_id)
 SELECT * FROM orders
 WHERE payment_reference = sqlc.arg(payment_reference);
 
+-- name: LockOrderByPaymentReference :one
+SELECT orders.*, item.id AS order_item_id, item.product_id,
+       item.product_name, item.unit_price_vnd, item.quantity,
+       item.line_total_vnd
+FROM orders
+JOIN LATERAL (
+    SELECT * FROM order_items WHERE order_id = orders.id ORDER BY id LIMIT 1
+) AS item ON true
+WHERE orders.payment_reference = sqlc.arg(payment_reference)
+FOR UPDATE OF orders;
+
 -- name: CountOrdersOwnedByTelegramUser :one
 SELECT count(*)::bigint
 FROM orders

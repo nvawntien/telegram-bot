@@ -235,6 +235,16 @@ type Payment struct {
 	ConfirmedAt           pgtype.Timestamptz `db:"confirmed_at" json:"confirmed_at"`
 	CreatedAt             pgtype.Timestamptz `db:"created_at" json:"created_at"`
 	UpdatedAt             pgtype.Timestamptz `db:"updated_at" json:"updated_at"`
+	OccurredAt            pgtype.Timestamptz `db:"occurred_at" json:"occurred_at"`
+}
+
+type PaymentAllocation struct {
+	ID         int64              `db:"id" json:"id"`
+	PaymentID  int64              `db:"payment_id" json:"payment_id"`
+	TargetType string             `db:"target_type" json:"target_type"`
+	TargetID   int64              `db:"target_id" json:"target_id"`
+	AmountVnd  int64              `db:"amount_vnd" json:"amount_vnd"`
+	CreatedAt  pgtype.Timestamptz `db:"created_at" json:"created_at"`
 }
 
 type PaymentEvent struct {
@@ -250,6 +260,34 @@ type PaymentEvent struct {
 	ProcessingError       pgtype.Text        `db:"processing_error" json:"processing_error"`
 	ReceivedAt            pgtype.Timestamptz `db:"received_at" json:"received_at"`
 	ProcessedAt           pgtype.Timestamptz `db:"processed_at" json:"processed_at"`
+	CreatedAt             pgtype.Timestamptz `db:"created_at" json:"created_at"`
+	UpdatedAt             pgtype.Timestamptz `db:"updated_at" json:"updated_at"`
+	Attempts              int32              `db:"attempts" json:"attempts"`
+	MaxAttempts           int32              `db:"max_attempts" json:"max_attempts"`
+	NextAttemptAt         pgtype.Timestamptz `db:"next_attempt_at" json:"next_attempt_at"`
+	ProcessingStartedAt   pgtype.Timestamptz `db:"processing_started_at" json:"processing_started_at"`
+	LastErrorCode         pgtype.Text        `db:"last_error_code" json:"last_error_code"`
+	RelatedOrderID        pgtype.Int8        `db:"related_order_id" json:"related_order_id"`
+	RelatedWalletTopupID  pgtype.Int8        `db:"related_wallet_topup_id" json:"related_wallet_topup_id"`
+}
+
+type PaymentReviewCase struct {
+	ID                    int64              `db:"id" json:"id"`
+	PaymentEventID        pgtype.Int8        `db:"payment_event_id" json:"payment_event_id"`
+	PaymentID             pgtype.Int8        `db:"payment_id" json:"payment_id"`
+	OrderID               pgtype.Int8        `db:"order_id" json:"order_id"`
+	WalletTopupID         pgtype.Int8        `db:"wallet_topup_id" json:"wallet_topup_id"`
+	Provider              string             `db:"provider" json:"provider"`
+	ProviderTransactionID pgtype.Text        `db:"provider_transaction_id" json:"provider_transaction_id"`
+	PaymentReference      string             `db:"payment_reference" json:"payment_reference"`
+	AmountVnd             int64              `db:"amount_vnd" json:"amount_vnd"`
+	Currency              string             `db:"currency" json:"currency"`
+	OccurredAt            pgtype.Timestamptz `db:"occurred_at" json:"occurred_at"`
+	Reason                string             `db:"reason" json:"reason"`
+	Status                string             `db:"status" json:"status"`
+	ResolutionNote        pgtype.Text        `db:"resolution_note" json:"resolution_note"`
+	ResolvedByAdminID     pgtype.Int8        `db:"resolved_by_admin_id" json:"resolved_by_admin_id"`
+	ResolvedAt            pgtype.Timestamptz `db:"resolved_at" json:"resolved_at"`
 	CreatedAt             pgtype.Timestamptz `db:"created_at" json:"created_at"`
 	UpdatedAt             pgtype.Timestamptz `db:"updated_at" json:"updated_at"`
 }
@@ -341,4 +379,30 @@ type WalletLedgerEntry struct {
 	ReferenceID     int64              `db:"reference_id" json:"reference_id"`
 	IdempotencyKey  string             `db:"idempotency_key" json:"idempotency_key"`
 	CreatedAt       pgtype.Timestamptz `db:"created_at" json:"created_at"`
+}
+
+type WalletTopupIntent struct {
+	ID                              int64              `db:"id" json:"id"`
+	UserID                          int64              `db:"user_id" json:"user_id"`
+	WalletAccountID                 int64              `db:"wallet_account_id" json:"wallet_account_id"`
+	AmountVnd                       int64              `db:"amount_vnd" json:"amount_vnd"`
+	Currency                        string             `db:"currency" json:"currency"`
+	PaymentReference                string             `db:"payment_reference" json:"payment_reference"`
+	IdempotencyKey                  string             `db:"idempotency_key" json:"idempotency_key"`
+	Status                          string             `db:"status" json:"status"`
+	ExpiresAt                       pgtype.Timestamptz `db:"expires_at" json:"expires_at"`
+	CreditedAt                      pgtype.Timestamptz `db:"credited_at" json:"credited_at"`
+	BankAccountID                   int64              `db:"bank_account_id" json:"bank_account_id"`
+	BankBinSnapshot                 string             `db:"bank_bin_snapshot" json:"bank_bin_snapshot"`
+	BankNameSnapshot                string             `db:"bank_name_snapshot" json:"bank_name_snapshot"`
+	BankDisplayNameSnapshot         string             `db:"bank_display_name_snapshot" json:"bank_display_name_snapshot"`
+	BankAccountNameSnapshot         string             `db:"bank_account_name_snapshot" json:"bank_account_name_snapshot"`
+	EncryptedAccountNumberSnapshot  []byte             `db:"encrypted_account_number_snapshot" json:"encrypted_account_number_snapshot"`
+	AccountNumberNonceSnapshot      []byte             `db:"account_number_nonce_snapshot" json:"account_number_nonce_snapshot"`
+	AccountEncryptionFormatSnapshot string             `db:"account_encryption_format_snapshot" json:"account_encryption_format_snapshot"`
+	AccountKeyVersionSnapshot       int32              `db:"account_key_version_snapshot" json:"account_key_version_snapshot"`
+	AccountLast4Snapshot            string             `db:"account_last4_snapshot" json:"account_last4_snapshot"`
+	Version                         int64              `db:"version" json:"version"`
+	CreatedAt                       pgtype.Timestamptz `db:"created_at" json:"created_at"`
+	UpdatedAt                       pgtype.Timestamptz `db:"updated_at" json:"updated_at"`
 }
