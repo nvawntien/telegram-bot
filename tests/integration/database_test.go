@@ -188,14 +188,19 @@ func (d *testDatabase) createInventory(
 	t.Helper()
 	fingerprint := make([]byte, 32)
 	fingerprint[0] = byte(d.keySequence.Add(1))
+	nonce := make([]byte, 12)
+	nonce[0] = fingerprint[0]
+	ciphertext := make([]byte, 16)
+	ciphertext[0] = fingerprint[0]
 	var id int64
 	err := d.pool.QueryRow(context.Background(), `
 		INSERT INTO inventory_items (
 			product_id, encrypted_payload, encryption_key_id, payload_fingerprint,
+			encryption_nonce, encryption_format, encryption_key_version,
 			status, reserved_order_id, reserved_until, sold_order_id
-		) VALUES ($1, $2, 'test-key-v1', $3, $4, $5, $6, $7)
+		) VALUES ($1, $2, 'test-key-v1', $3, $4, 'aes-256-gcm-v1', 1, $5, $6, $7, $8)
 		RETURNING id
-	`, productID, []byte{0x01, 0x02, 0x03}, fingerprint, status, reservedOrderID, reservedUntil, soldOrderID).Scan(&id)
+	`, productID, ciphertext, fingerprint, nonce, status, reservedOrderID, reservedUntil, soldOrderID).Scan(&id)
 	if err != nil {
 		t.Fatalf("create inventory: %v", err)
 	}

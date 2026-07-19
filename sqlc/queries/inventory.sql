@@ -112,6 +112,7 @@ WITH selected_items AS (
     FROM inventory_items AS available
     WHERE available.product_id = sqlc.arg(product_id)
       AND available.status = 'available'
+      AND available.encryption_format = 'aes-256-gcm-v1'
       AND NOT EXISTS (
           SELECT 1
           FROM order_inventory_items AS mapping
