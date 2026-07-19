@@ -220,6 +220,172 @@ type InventoryRecoveryResult struct {
 	OrderStatus      domain.OrderStatus
 }
 
+type ProtectedBankAccountNumber struct {
+	Ciphertext  []byte
+	Nonce       []byte
+	Fingerprint []byte
+	KeyVersion  int32
+	KeyID       string
+	Format      string
+}
+
+type BankAccountOption struct {
+	ID          int64
+	BankBIN     string
+	BankName    string
+	DisplayName string
+	AccountName string
+	Last4       string
+	SortOrder   int32
+	Version     int64
+}
+
+type BankAccountRecord struct {
+	BankAccountOption
+	Protected ProtectedBankAccountNumber
+	Active    bool
+	CreatedAt time.Time
+}
+
+type RedactedBankAccount struct {
+	BankAccountOption
+	Active     bool
+	KeyVersion int32
+	Format     string
+	CreatedAt  time.Time
+}
+
+type RedactedBankAccountPage struct {
+	Items []RedactedBankAccount
+	Page  PageInfo
+}
+
+type BankAccountInput struct {
+	BankBIN       string
+	BankName      string
+	DisplayName   string
+	AccountName   string
+	AccountNumber string
+	SortOrder     int32
+}
+
+type CreateBankAccountInput struct {
+	BankAccountInput
+	Meta RequestMeta
+}
+
+type UpdateBankAccountInput struct {
+	BankAccountID  int64
+	ExpectedRecord int64
+	BankAccountInput
+	Meta RequestMeta
+}
+
+type SetBankAccountActiveInput struct {
+	BankAccountID  int64
+	ExpectedRecord int64
+	Active         bool
+	Meta           RequestMeta
+}
+
+type OrderItemSnapshot struct {
+	ID        int64
+	ProductID int64
+	Name      string
+	UnitPrice domain.Money
+	Quantity  int32
+	LineTotal domain.Money
+}
+
+type OrderSummary struct {
+	ID               int64
+	Status           domain.OrderStatus
+	Total            domain.Money
+	PaymentReference string
+	ExpiresAt        time.Time
+	Version          int64
+	CreatedAt        time.Time
+	ProductName      string
+	Quantity         int32
+}
+
+type OrderPage struct {
+	Items []OrderSummary
+	Page  PageInfo
+}
+
+type OrderDetail struct {
+	ID               int64
+	UserID           int64
+	Status           domain.OrderStatus
+	Currency         string
+	Subtotal         domain.Money
+	Total            domain.Money
+	PaymentReference string
+	ExpiresAt        time.Time
+	CancelledAt      time.Time
+	Version          int64
+	CreatedAt        time.Time
+	BankAccountID    int64
+	BankBIN          string
+	BankName         string
+	BankDisplayName  string
+	BankAccountName  string
+	BankAccountLast4 string
+	BankProtected    ProtectedBankAccountNumber
+	Item             OrderItemSnapshot
+}
+
+type PaymentInstructionRequest struct {
+	BankBIN          string
+	BankName         string
+	AccountNumber    string
+	AccountName      string
+	BankDisplayName  string
+	Amount           domain.Money
+	PaymentReference string
+	OrderID          int64
+	ExpiresAt        time.Time
+}
+
+type PaymentInstruction struct {
+	ImageURL        string
+	BankDisplayName string
+	BankName        string
+	AccountNumber   string
+	AccountName     string
+	Amount          domain.Money
+	TransferContent string
+	ExpiresAt       time.Time
+}
+
+type CreateOrderCommand struct {
+	TelegramUserID int64
+	ProductID      int64
+	BankAccountID  int64
+	Quantity       int32
+	IdempotencyKey string
+	Meta           RequestMeta
+}
+
+type CreateOrderResult struct {
+	Order       OrderDetail
+	Instruction PaymentInstruction
+	Duplicate   bool
+}
+
+type CancelOrderCommand struct {
+	TelegramUserID  int64
+	OrderID         int64
+	ExpectedVersion int64
+	Meta            RequestMeta
+}
+
+type CancelOrderResult struct {
+	Order            OrderDetail
+	AlreadyCancelled bool
+}
+
 func pageInfo(page, size int, total int64) PageInfo {
 	totalPages := 0
 	if total > 0 {

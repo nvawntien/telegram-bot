@@ -21,6 +21,9 @@ const (
 	SessionProductToggle   = "product.toggle"
 	SessionInventoryImport = "inventory.import"
 	SessionInventoryToggle = "inventory.toggle"
+	SessionBankCreate      = "bank.create"
+	SessionBankEdit        = "bank.edit"
+	SessionBankToggle      = "bank.toggle"
 )
 
 type AdminRepository interface {
@@ -316,7 +319,8 @@ func validSessionState(state string) bool {
 	switch state {
 	case SessionCategoryCreate, SessionCategoryEdit, SessionCategoryToggle,
 		SessionProductCreate, SessionProductEdit, SessionProductToggle,
-		SessionInventoryImport, SessionInventoryToggle:
+		SessionInventoryImport, SessionInventoryToggle,
+		SessionBankCreate, SessionBankEdit, SessionBankToggle:
 		return true
 	default:
 		return false

@@ -81,6 +81,24 @@ func (s OrderStatus) IsTerminal() bool {
 	return s == OrderStatusCancelled || s == OrderStatusRefunded
 }
 
+// IsCustomerTerminal reports whether Phase 5 customer actions may leave this
+// state. Later payment reconciliation may still handle an expired order.
+func (s OrderStatus) IsCustomerTerminal() bool {
+	return s == OrderStatusExpired || s == OrderStatusCancelled
+}
+
+// ValidateCustomerOrderTransition limits customer mutations to cancellation.
+// Payment and delivery transitions are never accepted from customer input.
+func ValidateCustomerOrderTransition(from, to OrderStatus) error {
+	if !from.IsValid() || !to.IsValid() {
+		return ErrInvalidStatus
+	}
+	if from != OrderStatusPendingPayment || to != OrderStatusCancelled {
+		return ErrInvalidOrderTransition
+	}
+	return nil
+}
+
 // CanTransitionOrder reports whether the domain state machine permits a change.
 func CanTransitionOrder(from, to OrderStatus) bool {
 	if !from.IsValid() || !to.IsValid() || from == to {

@@ -70,6 +70,23 @@ func TestInvalidOrderStatus(t *testing.T) {
 	}
 }
 
+func TestCustomerOrderTransitionPolicy(t *testing.T) {
+	if err := ValidateCustomerOrderTransition(OrderStatusPendingPayment, OrderStatusCancelled); err != nil {
+		t.Fatalf("pending -> cancelled error = %v", err)
+	}
+	for _, target := range []OrderStatus{OrderStatusPaid, OrderStatusExpired, OrderStatusDelivered} {
+		if err := ValidateCustomerOrderTransition(OrderStatusPendingPayment, target); !errors.Is(err, ErrInvalidOrderTransition) {
+			t.Fatalf("pending -> %s error = %v", target, err)
+		}
+	}
+	if !OrderStatusExpired.IsCustomerTerminal() || !OrderStatusCancelled.IsCustomerTerminal() {
+		t.Fatal("expired and cancelled must be customer-terminal")
+	}
+	if OrderStatusPendingPayment.IsCustomerTerminal() {
+		t.Fatal("pending must not be customer-terminal")
+	}
+}
+
 func allOrderStatuses() []OrderStatus {
 	return []OrderStatus{
 		OrderStatusPendingPayment,
