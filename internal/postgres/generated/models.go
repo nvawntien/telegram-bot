@@ -56,6 +56,11 @@ type BankAccount struct {
 	IsActive                 bool               `db:"is_active" json:"is_active"`
 	CreatedAt                pgtype.Timestamptz `db:"created_at" json:"created_at"`
 	UpdatedAt                pgtype.Timestamptz `db:"updated_at" json:"updated_at"`
+	DisplayName              string             `db:"display_name" json:"display_name"`
+	EncryptionNonce          []byte             `db:"encryption_nonce" json:"encryption_nonce"`
+	EncryptionFormat         string             `db:"encryption_format" json:"encryption_format"`
+	EncryptionKeyVersion     int32              `db:"encryption_key_version" json:"encryption_key_version"`
+	Version                  int64              `db:"version" json:"version"`
 }
 
 type Broadcast struct {
@@ -135,22 +140,32 @@ type InventoryItem struct {
 }
 
 type Order struct {
-	ID                int64              `db:"id" json:"id"`
-	UserID            int64              `db:"user_id" json:"user_id"`
-	Status            string             `db:"status" json:"status"`
-	Currency          string             `db:"currency" json:"currency"`
-	SubtotalVnd       int64              `db:"subtotal_vnd" json:"subtotal_vnd"`
-	TotalVnd          int64              `db:"total_vnd" json:"total_vnd"`
-	PaymentReference  string             `db:"payment_reference" json:"payment_reference"`
-	IdempotencyKey    string             `db:"idempotency_key" json:"idempotency_key"`
-	ExpiresAt         pgtype.Timestamptz `db:"expires_at" json:"expires_at"`
-	PaidAt            pgtype.Timestamptz `db:"paid_at" json:"paid_at"`
-	DeliveryStartedAt pgtype.Timestamptz `db:"delivery_started_at" json:"delivery_started_at"`
-	DeliveredAt       pgtype.Timestamptz `db:"delivered_at" json:"delivered_at"`
-	CancelledAt       pgtype.Timestamptz `db:"cancelled_at" json:"cancelled_at"`
-	Version           int64              `db:"version" json:"version"`
-	CreatedAt         pgtype.Timestamptz `db:"created_at" json:"created_at"`
-	UpdatedAt         pgtype.Timestamptz `db:"updated_at" json:"updated_at"`
+	ID                              int64              `db:"id" json:"id"`
+	UserID                          int64              `db:"user_id" json:"user_id"`
+	Status                          string             `db:"status" json:"status"`
+	Currency                        string             `db:"currency" json:"currency"`
+	SubtotalVnd                     int64              `db:"subtotal_vnd" json:"subtotal_vnd"`
+	TotalVnd                        int64              `db:"total_vnd" json:"total_vnd"`
+	PaymentReference                string             `db:"payment_reference" json:"payment_reference"`
+	IdempotencyKey                  string             `db:"idempotency_key" json:"idempotency_key"`
+	ExpiresAt                       pgtype.Timestamptz `db:"expires_at" json:"expires_at"`
+	PaidAt                          pgtype.Timestamptz `db:"paid_at" json:"paid_at"`
+	DeliveryStartedAt               pgtype.Timestamptz `db:"delivery_started_at" json:"delivery_started_at"`
+	DeliveredAt                     pgtype.Timestamptz `db:"delivered_at" json:"delivered_at"`
+	CancelledAt                     pgtype.Timestamptz `db:"cancelled_at" json:"cancelled_at"`
+	Version                         int64              `db:"version" json:"version"`
+	CreatedAt                       pgtype.Timestamptz `db:"created_at" json:"created_at"`
+	UpdatedAt                       pgtype.Timestamptz `db:"updated_at" json:"updated_at"`
+	BankAccountID                   pgtype.Int8        `db:"bank_account_id" json:"bank_account_id"`
+	BankBinSnapshot                 pgtype.Text        `db:"bank_bin_snapshot" json:"bank_bin_snapshot"`
+	BankNameSnapshot                pgtype.Text        `db:"bank_name_snapshot" json:"bank_name_snapshot"`
+	BankDisplayNameSnapshot         pgtype.Text        `db:"bank_display_name_snapshot" json:"bank_display_name_snapshot"`
+	BankAccountNameSnapshot         pgtype.Text        `db:"bank_account_name_snapshot" json:"bank_account_name_snapshot"`
+	EncryptedAccountNumberSnapshot  []byte             `db:"encrypted_account_number_snapshot" json:"encrypted_account_number_snapshot"`
+	AccountNumberNonceSnapshot      []byte             `db:"account_number_nonce_snapshot" json:"account_number_nonce_snapshot"`
+	AccountEncryptionFormatSnapshot pgtype.Text        `db:"account_encryption_format_snapshot" json:"account_encryption_format_snapshot"`
+	AccountKeyVersionSnapshot       pgtype.Int4        `db:"account_key_version_snapshot" json:"account_key_version_snapshot"`
+	AccountLast4Snapshot            pgtype.Text        `db:"account_last4_snapshot" json:"account_last4_snapshot"`
 }
 
 type OrderInventoryItem struct {

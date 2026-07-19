@@ -11,6 +11,171 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const cancelPendingOrderOwnedGuarded = `-- name: CancelPendingOrderOwnedGuarded :one
+UPDATE orders
+SET status = 'cancelled',
+    cancelled_at = clock_timestamp(),
+    version = version + 1
+WHERE id = $1
+  AND user_id = $2
+  AND status = 'pending_payment'
+  AND expires_at > $3
+  AND version = $4
+RETURNING id, user_id, status, currency, subtotal_vnd, total_vnd, payment_reference, idempotency_key, expires_at, paid_at, delivery_started_at, delivered_at, cancelled_at, version, created_at, updated_at, bank_account_id, bank_bin_snapshot, bank_name_snapshot, bank_display_name_snapshot, bank_account_name_snapshot, encrypted_account_number_snapshot, account_number_nonce_snapshot, account_encryption_format_snapshot, account_key_version_snapshot, account_last4_snapshot
+`
+
+type CancelPendingOrderOwnedGuardedParams struct {
+	ID              int64              `db:"id" json:"id"`
+	UserID          int64              `db:"user_id" json:"user_id"`
+	Now             pgtype.Timestamptz `db:"now" json:"now"`
+	ExpectedVersion int64              `db:"expected_version" json:"expected_version"`
+}
+
+func (q *Queries) CancelPendingOrderOwnedGuarded(ctx context.Context, arg CancelPendingOrderOwnedGuardedParams) (Order, error) {
+	row := q.db.QueryRow(ctx, cancelPendingOrderOwnedGuarded,
+		arg.ID,
+		arg.UserID,
+		arg.Now,
+		arg.ExpectedVersion,
+	)
+	var i Order
+	err := row.Scan(
+		&i.ID,
+		&i.UserID,
+		&i.Status,
+		&i.Currency,
+		&i.SubtotalVnd,
+		&i.TotalVnd,
+		&i.PaymentReference,
+		&i.IdempotencyKey,
+		&i.ExpiresAt,
+		&i.PaidAt,
+		&i.DeliveryStartedAt,
+		&i.DeliveredAt,
+		&i.CancelledAt,
+		&i.Version,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.BankAccountID,
+		&i.BankBinSnapshot,
+		&i.BankNameSnapshot,
+		&i.BankDisplayNameSnapshot,
+		&i.BankAccountNameSnapshot,
+		&i.EncryptedAccountNumberSnapshot,
+		&i.AccountNumberNonceSnapshot,
+		&i.AccountEncryptionFormatSnapshot,
+		&i.AccountKeyVersionSnapshot,
+		&i.AccountLast4Snapshot,
+	)
+	return i, err
+}
+
+const claimOverduePendingOrders = `-- name: ClaimOverduePendingOrders :many
+WITH selected_orders AS (
+    SELECT id
+    FROM orders
+    WHERE status = 'pending_payment'
+      AND expires_at <= $1
+    ORDER BY expires_at, id
+    FOR UPDATE SKIP LOCKED
+    LIMIT $2::integer
+)
+UPDATE orders
+SET status = 'expired',
+    version = version + 1
+FROM selected_orders
+WHERE orders.id = selected_orders.id
+  AND orders.status = 'pending_payment'
+  AND orders.expires_at <= $1
+RETURNING orders.id, orders.user_id, orders.status, orders.currency, orders.subtotal_vnd, orders.total_vnd, orders.payment_reference, orders.idempotency_key, orders.expires_at, orders.paid_at, orders.delivery_started_at, orders.delivered_at, orders.cancelled_at, orders.version, orders.created_at, orders.updated_at, orders.bank_account_id, orders.bank_bin_snapshot, orders.bank_name_snapshot, orders.bank_display_name_snapshot, orders.bank_account_name_snapshot, orders.encrypted_account_number_snapshot, orders.account_number_nonce_snapshot, orders.account_encryption_format_snapshot, orders.account_key_version_snapshot, orders.account_last4_snapshot
+`
+
+type ClaimOverduePendingOrdersParams struct {
+	Now       pgtype.Timestamptz `db:"now" json:"now"`
+	BatchSize int32              `db:"batch_size" json:"batch_size"`
+}
+
+func (q *Queries) ClaimOverduePendingOrders(ctx context.Context, arg ClaimOverduePendingOrdersParams) ([]Order, error) {
+	rows, err := q.db.Query(ctx, claimOverduePendingOrders, arg.Now, arg.BatchSize)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []Order{}
+	for rows.Next() {
+		var i Order
+		if err := rows.Scan(
+			&i.ID,
+			&i.UserID,
+			&i.Status,
+			&i.Currency,
+			&i.SubtotalVnd,
+			&i.TotalVnd,
+			&i.PaymentReference,
+			&i.IdempotencyKey,
+			&i.ExpiresAt,
+			&i.PaidAt,
+			&i.DeliveryStartedAt,
+			&i.DeliveredAt,
+			&i.CancelledAt,
+			&i.Version,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.BankAccountID,
+			&i.BankBinSnapshot,
+			&i.BankNameSnapshot,
+			&i.BankDisplayNameSnapshot,
+			&i.BankAccountNameSnapshot,
+			&i.EncryptedAccountNumberSnapshot,
+			&i.AccountNumberNonceSnapshot,
+			&i.AccountEncryptionFormatSnapshot,
+			&i.AccountKeyVersionSnapshot,
+			&i.AccountLast4Snapshot,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const countClaimableInventoryForOrder = `-- name: CountClaimableInventoryForOrder :one
+SELECT count(*)::bigint
+FROM inventory_items AS inventory
+WHERE inventory.product_id = $1
+  AND inventory.status = 'available'
+  AND inventory.encryption_format = 'aes-256-gcm-v1'
+  AND NOT EXISTS (
+      SELECT 1 FROM order_inventory_items AS mapping
+      WHERE mapping.inventory_item_id = inventory.id
+        AND mapping.status = 'active'
+  )
+`
+
+func (q *Queries) CountClaimableInventoryForOrder(ctx context.Context, productID int64) (int64, error) {
+	row := q.db.QueryRow(ctx, countClaimableInventoryForOrder, productID)
+	var column_1 int64
+	err := row.Scan(&column_1)
+	return column_1, err
+}
+
+const countOrdersOwnedByTelegramUser = `-- name: CountOrdersOwnedByTelegramUser :one
+SELECT count(*)::bigint
+FROM orders
+JOIN users ON users.id = orders.user_id
+WHERE users.telegram_user_id = $1
+`
+
+func (q *Queries) CountOrdersOwnedByTelegramUser(ctx context.Context, telegramUserID int64) (int64, error) {
+	row := q.db.QueryRow(ctx, countOrdersOwnedByTelegramUser, telegramUserID)
+	var column_1 int64
+	err := row.Scan(&column_1)
+	return column_1, err
+}
+
 const createPendingOrder = `-- name: CreatePendingOrder :one
 INSERT INTO orders (
     user_id,
@@ -31,7 +196,7 @@ INSERT INTO orders (
     $5,
     $6
 )
-RETURNING id, user_id, status, currency, subtotal_vnd, total_vnd, payment_reference, idempotency_key, expires_at, paid_at, delivery_started_at, delivered_at, cancelled_at, version, created_at, updated_at
+RETURNING id, user_id, status, currency, subtotal_vnd, total_vnd, payment_reference, idempotency_key, expires_at, paid_at, delivery_started_at, delivered_at, cancelled_at, version, created_at, updated_at, bank_account_id, bank_bin_snapshot, bank_name_snapshot, bank_display_name_snapshot, bank_account_name_snapshot, encrypted_account_number_snapshot, account_number_nonce_snapshot, account_encryption_format_snapshot, account_key_version_snapshot, account_last4_snapshot
 `
 
 type CreatePendingOrderParams struct {
@@ -70,12 +235,198 @@ func (q *Queries) CreatePendingOrder(ctx context.Context, arg CreatePendingOrder
 		&i.Version,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.BankAccountID,
+		&i.BankBinSnapshot,
+		&i.BankNameSnapshot,
+		&i.BankDisplayNameSnapshot,
+		&i.BankAccountNameSnapshot,
+		&i.EncryptedAccountNumberSnapshot,
+		&i.AccountNumberNonceSnapshot,
+		&i.AccountEncryptionFormatSnapshot,
+		&i.AccountKeyVersionSnapshot,
+		&i.AccountLast4Snapshot,
+	)
+	return i, err
+}
+
+const createPendingOrderWithBank = `-- name: CreatePendingOrderWithBank :one
+INSERT INTO orders (
+    user_id, status, currency, subtotal_vnd, total_vnd,
+    payment_reference, idempotency_key, expires_at,
+    bank_account_id, bank_bin_snapshot, bank_name_snapshot,
+    bank_display_name_snapshot, bank_account_name_snapshot,
+    encrypted_account_number_snapshot, account_number_nonce_snapshot,
+    account_encryption_format_snapshot, account_key_version_snapshot,
+    account_last4_snapshot
+) VALUES (
+    $1, 'pending_payment', 'VND',
+    $2, $3,
+    $4, $5,
+    $6, $7,
+    $8, $9,
+    $10, $11,
+    $12,
+    $13, 'aes-256-gcm-v1',
+    $14, $15
+)
+ON CONFLICT DO NOTHING
+RETURNING id, user_id, status, currency, subtotal_vnd, total_vnd, payment_reference, idempotency_key, expires_at, paid_at, delivery_started_at, delivered_at, cancelled_at, version, created_at, updated_at, bank_account_id, bank_bin_snapshot, bank_name_snapshot, bank_display_name_snapshot, bank_account_name_snapshot, encrypted_account_number_snapshot, account_number_nonce_snapshot, account_encryption_format_snapshot, account_key_version_snapshot, account_last4_snapshot
+`
+
+type CreatePendingOrderWithBankParams struct {
+	UserID                         int64              `db:"user_id" json:"user_id"`
+	SubtotalVnd                    int64              `db:"subtotal_vnd" json:"subtotal_vnd"`
+	TotalVnd                       int64              `db:"total_vnd" json:"total_vnd"`
+	PaymentReference               string             `db:"payment_reference" json:"payment_reference"`
+	IdempotencyKey                 string             `db:"idempotency_key" json:"idempotency_key"`
+	ExpiresAt                      pgtype.Timestamptz `db:"expires_at" json:"expires_at"`
+	BankAccountID                  pgtype.Int8        `db:"bank_account_id" json:"bank_account_id"`
+	BankBinSnapshot                pgtype.Text        `db:"bank_bin_snapshot" json:"bank_bin_snapshot"`
+	BankNameSnapshot               pgtype.Text        `db:"bank_name_snapshot" json:"bank_name_snapshot"`
+	BankDisplayNameSnapshot        pgtype.Text        `db:"bank_display_name_snapshot" json:"bank_display_name_snapshot"`
+	BankAccountNameSnapshot        pgtype.Text        `db:"bank_account_name_snapshot" json:"bank_account_name_snapshot"`
+	EncryptedAccountNumberSnapshot []byte             `db:"encrypted_account_number_snapshot" json:"encrypted_account_number_snapshot"`
+	AccountNumberNonceSnapshot     []byte             `db:"account_number_nonce_snapshot" json:"account_number_nonce_snapshot"`
+	AccountKeyVersionSnapshot      pgtype.Int4        `db:"account_key_version_snapshot" json:"account_key_version_snapshot"`
+	AccountLast4Snapshot           pgtype.Text        `db:"account_last4_snapshot" json:"account_last4_snapshot"`
+}
+
+func (q *Queries) CreatePendingOrderWithBank(ctx context.Context, arg CreatePendingOrderWithBankParams) (Order, error) {
+	row := q.db.QueryRow(ctx, createPendingOrderWithBank,
+		arg.UserID,
+		arg.SubtotalVnd,
+		arg.TotalVnd,
+		arg.PaymentReference,
+		arg.IdempotencyKey,
+		arg.ExpiresAt,
+		arg.BankAccountID,
+		arg.BankBinSnapshot,
+		arg.BankNameSnapshot,
+		arg.BankDisplayNameSnapshot,
+		arg.BankAccountNameSnapshot,
+		arg.EncryptedAccountNumberSnapshot,
+		arg.AccountNumberNonceSnapshot,
+		arg.AccountKeyVersionSnapshot,
+		arg.AccountLast4Snapshot,
+	)
+	var i Order
+	err := row.Scan(
+		&i.ID,
+		&i.UserID,
+		&i.Status,
+		&i.Currency,
+		&i.SubtotalVnd,
+		&i.TotalVnd,
+		&i.PaymentReference,
+		&i.IdempotencyKey,
+		&i.ExpiresAt,
+		&i.PaidAt,
+		&i.DeliveryStartedAt,
+		&i.DeliveredAt,
+		&i.CancelledAt,
+		&i.Version,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.BankAccountID,
+		&i.BankBinSnapshot,
+		&i.BankNameSnapshot,
+		&i.BankDisplayNameSnapshot,
+		&i.BankAccountNameSnapshot,
+		&i.EncryptedAccountNumberSnapshot,
+		&i.AccountNumberNonceSnapshot,
+		&i.AccountEncryptionFormatSnapshot,
+		&i.AccountKeyVersionSnapshot,
+		&i.AccountLast4Snapshot,
+	)
+	return i, err
+}
+
+const findOrderByPaymentReference = `-- name: FindOrderByPaymentReference :one
+SELECT id, user_id, status, currency, subtotal_vnd, total_vnd, payment_reference, idempotency_key, expires_at, paid_at, delivery_started_at, delivered_at, cancelled_at, version, created_at, updated_at, bank_account_id, bank_bin_snapshot, bank_name_snapshot, bank_display_name_snapshot, bank_account_name_snapshot, encrypted_account_number_snapshot, account_number_nonce_snapshot, account_encryption_format_snapshot, account_key_version_snapshot, account_last4_snapshot FROM orders
+WHERE payment_reference = $1
+`
+
+func (q *Queries) FindOrderByPaymentReference(ctx context.Context, paymentReference string) (Order, error) {
+	row := q.db.QueryRow(ctx, findOrderByPaymentReference, paymentReference)
+	var i Order
+	err := row.Scan(
+		&i.ID,
+		&i.UserID,
+		&i.Status,
+		&i.Currency,
+		&i.SubtotalVnd,
+		&i.TotalVnd,
+		&i.PaymentReference,
+		&i.IdempotencyKey,
+		&i.ExpiresAt,
+		&i.PaidAt,
+		&i.DeliveryStartedAt,
+		&i.DeliveredAt,
+		&i.CancelledAt,
+		&i.Version,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.BankAccountID,
+		&i.BankBinSnapshot,
+		&i.BankNameSnapshot,
+		&i.BankDisplayNameSnapshot,
+		&i.BankAccountNameSnapshot,
+		&i.EncryptedAccountNumberSnapshot,
+		&i.AccountNumberNonceSnapshot,
+		&i.AccountEncryptionFormatSnapshot,
+		&i.AccountKeyVersionSnapshot,
+		&i.AccountLast4Snapshot,
+	)
+	return i, err
+}
+
+const findOrderByUserIdempotency = `-- name: FindOrderByUserIdempotency :one
+SELECT id, user_id, status, currency, subtotal_vnd, total_vnd, payment_reference, idempotency_key, expires_at, paid_at, delivery_started_at, delivered_at, cancelled_at, version, created_at, updated_at, bank_account_id, bank_bin_snapshot, bank_name_snapshot, bank_display_name_snapshot, bank_account_name_snapshot, encrypted_account_number_snapshot, account_number_nonce_snapshot, account_encryption_format_snapshot, account_key_version_snapshot, account_last4_snapshot FROM orders
+WHERE user_id = $1
+  AND idempotency_key = $2
+`
+
+type FindOrderByUserIdempotencyParams struct {
+	UserID         int64  `db:"user_id" json:"user_id"`
+	IdempotencyKey string `db:"idempotency_key" json:"idempotency_key"`
+}
+
+func (q *Queries) FindOrderByUserIdempotency(ctx context.Context, arg FindOrderByUserIdempotencyParams) (Order, error) {
+	row := q.db.QueryRow(ctx, findOrderByUserIdempotency, arg.UserID, arg.IdempotencyKey)
+	var i Order
+	err := row.Scan(
+		&i.ID,
+		&i.UserID,
+		&i.Status,
+		&i.Currency,
+		&i.SubtotalVnd,
+		&i.TotalVnd,
+		&i.PaymentReference,
+		&i.IdempotencyKey,
+		&i.ExpiresAt,
+		&i.PaidAt,
+		&i.DeliveryStartedAt,
+		&i.DeliveredAt,
+		&i.CancelledAt,
+		&i.Version,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.BankAccountID,
+		&i.BankBinSnapshot,
+		&i.BankNameSnapshot,
+		&i.BankDisplayNameSnapshot,
+		&i.BankAccountNameSnapshot,
+		&i.EncryptedAccountNumberSnapshot,
+		&i.AccountNumberNonceSnapshot,
+		&i.AccountEncryptionFormatSnapshot,
+		&i.AccountKeyVersionSnapshot,
+		&i.AccountLast4Snapshot,
 	)
 	return i, err
 }
 
 const getOrderByID = `-- name: GetOrderByID :one
-SELECT id, user_id, status, currency, subtotal_vnd, total_vnd, payment_reference, idempotency_key, expires_at, paid_at, delivery_started_at, delivered_at, cancelled_at, version, created_at, updated_at
+SELECT id, user_id, status, currency, subtotal_vnd, total_vnd, payment_reference, idempotency_key, expires_at, paid_at, delivery_started_at, delivered_at, cancelled_at, version, created_at, updated_at, bank_account_id, bank_bin_snapshot, bank_name_snapshot, bank_display_name_snapshot, bank_account_name_snapshot, encrypted_account_number_snapshot, account_number_nonce_snapshot, account_encryption_format_snapshot, account_key_version_snapshot, account_last4_snapshot
 FROM orders
 WHERE id = $1
 `
@@ -100,12 +451,118 @@ func (q *Queries) GetOrderByID(ctx context.Context, id int64) (Order, error) {
 		&i.Version,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.BankAccountID,
+		&i.BankBinSnapshot,
+		&i.BankNameSnapshot,
+		&i.BankDisplayNameSnapshot,
+		&i.BankAccountNameSnapshot,
+		&i.EncryptedAccountNumberSnapshot,
+		&i.AccountNumberNonceSnapshot,
+		&i.AccountEncryptionFormatSnapshot,
+		&i.AccountKeyVersionSnapshot,
+		&i.AccountLast4Snapshot,
+	)
+	return i, err
+}
+
+const getOrderDetailOwnedByTelegramUser = `-- name: GetOrderDetailOwnedByTelegramUser :one
+SELECT orders.id, orders.user_id, orders.status, orders.currency, orders.subtotal_vnd, orders.total_vnd, orders.payment_reference, orders.idempotency_key, orders.expires_at, orders.paid_at, orders.delivery_started_at, orders.delivered_at, orders.cancelled_at, orders.version, orders.created_at, orders.updated_at, orders.bank_account_id, orders.bank_bin_snapshot, orders.bank_name_snapshot, orders.bank_display_name_snapshot, orders.bank_account_name_snapshot, orders.encrypted_account_number_snapshot, orders.account_number_nonce_snapshot, orders.account_encryption_format_snapshot, orders.account_key_version_snapshot, orders.account_last4_snapshot, item.id AS order_item_id, item.product_id,
+       item.product_name, item.unit_price_vnd, item.quantity,
+       item.line_total_vnd
+FROM orders
+JOIN users ON users.id = orders.user_id
+JOIN LATERAL (
+    SELECT id, order_id, product_id, product_name, unit_price_vnd, quantity, line_total_vnd, created_at FROM order_items
+    WHERE order_id = orders.id
+    ORDER BY id
+    LIMIT 1
+) AS item ON true
+WHERE orders.id = $1
+  AND users.telegram_user_id = $2
+`
+
+type GetOrderDetailOwnedByTelegramUserParams struct {
+	OrderID        int64 `db:"order_id" json:"order_id"`
+	TelegramUserID int64 `db:"telegram_user_id" json:"telegram_user_id"`
+}
+
+type GetOrderDetailOwnedByTelegramUserRow struct {
+	ID                              int64              `db:"id" json:"id"`
+	UserID                          int64              `db:"user_id" json:"user_id"`
+	Status                          string             `db:"status" json:"status"`
+	Currency                        string             `db:"currency" json:"currency"`
+	SubtotalVnd                     int64              `db:"subtotal_vnd" json:"subtotal_vnd"`
+	TotalVnd                        int64              `db:"total_vnd" json:"total_vnd"`
+	PaymentReference                string             `db:"payment_reference" json:"payment_reference"`
+	IdempotencyKey                  string             `db:"idempotency_key" json:"idempotency_key"`
+	ExpiresAt                       pgtype.Timestamptz `db:"expires_at" json:"expires_at"`
+	PaidAt                          pgtype.Timestamptz `db:"paid_at" json:"paid_at"`
+	DeliveryStartedAt               pgtype.Timestamptz `db:"delivery_started_at" json:"delivery_started_at"`
+	DeliveredAt                     pgtype.Timestamptz `db:"delivered_at" json:"delivered_at"`
+	CancelledAt                     pgtype.Timestamptz `db:"cancelled_at" json:"cancelled_at"`
+	Version                         int64              `db:"version" json:"version"`
+	CreatedAt                       pgtype.Timestamptz `db:"created_at" json:"created_at"`
+	UpdatedAt                       pgtype.Timestamptz `db:"updated_at" json:"updated_at"`
+	BankAccountID                   pgtype.Int8        `db:"bank_account_id" json:"bank_account_id"`
+	BankBinSnapshot                 pgtype.Text        `db:"bank_bin_snapshot" json:"bank_bin_snapshot"`
+	BankNameSnapshot                pgtype.Text        `db:"bank_name_snapshot" json:"bank_name_snapshot"`
+	BankDisplayNameSnapshot         pgtype.Text        `db:"bank_display_name_snapshot" json:"bank_display_name_snapshot"`
+	BankAccountNameSnapshot         pgtype.Text        `db:"bank_account_name_snapshot" json:"bank_account_name_snapshot"`
+	EncryptedAccountNumberSnapshot  []byte             `db:"encrypted_account_number_snapshot" json:"encrypted_account_number_snapshot"`
+	AccountNumberNonceSnapshot      []byte             `db:"account_number_nonce_snapshot" json:"account_number_nonce_snapshot"`
+	AccountEncryptionFormatSnapshot pgtype.Text        `db:"account_encryption_format_snapshot" json:"account_encryption_format_snapshot"`
+	AccountKeyVersionSnapshot       pgtype.Int4        `db:"account_key_version_snapshot" json:"account_key_version_snapshot"`
+	AccountLast4Snapshot            pgtype.Text        `db:"account_last4_snapshot" json:"account_last4_snapshot"`
+	OrderItemID                     int64              `db:"order_item_id" json:"order_item_id"`
+	ProductID                       int64              `db:"product_id" json:"product_id"`
+	ProductName                     string             `db:"product_name" json:"product_name"`
+	UnitPriceVnd                    int64              `db:"unit_price_vnd" json:"unit_price_vnd"`
+	Quantity                        int32              `db:"quantity" json:"quantity"`
+	LineTotalVnd                    int64              `db:"line_total_vnd" json:"line_total_vnd"`
+}
+
+func (q *Queries) GetOrderDetailOwnedByTelegramUser(ctx context.Context, arg GetOrderDetailOwnedByTelegramUserParams) (GetOrderDetailOwnedByTelegramUserRow, error) {
+	row := q.db.QueryRow(ctx, getOrderDetailOwnedByTelegramUser, arg.OrderID, arg.TelegramUserID)
+	var i GetOrderDetailOwnedByTelegramUserRow
+	err := row.Scan(
+		&i.ID,
+		&i.UserID,
+		&i.Status,
+		&i.Currency,
+		&i.SubtotalVnd,
+		&i.TotalVnd,
+		&i.PaymentReference,
+		&i.IdempotencyKey,
+		&i.ExpiresAt,
+		&i.PaidAt,
+		&i.DeliveryStartedAt,
+		&i.DeliveredAt,
+		&i.CancelledAt,
+		&i.Version,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.BankAccountID,
+		&i.BankBinSnapshot,
+		&i.BankNameSnapshot,
+		&i.BankDisplayNameSnapshot,
+		&i.BankAccountNameSnapshot,
+		&i.EncryptedAccountNumberSnapshot,
+		&i.AccountNumberNonceSnapshot,
+		&i.AccountEncryptionFormatSnapshot,
+		&i.AccountKeyVersionSnapshot,
+		&i.AccountLast4Snapshot,
+		&i.OrderItemID,
+		&i.ProductID,
+		&i.ProductName,
+		&i.UnitPriceVnd,
+		&i.Quantity,
+		&i.LineTotalVnd,
 	)
 	return i, err
 }
 
 const getOrderOwnedByUser = `-- name: GetOrderOwnedByUser :one
-SELECT id, user_id, status, currency, subtotal_vnd, total_vnd, payment_reference, idempotency_key, expires_at, paid_at, delivery_started_at, delivered_at, cancelled_at, version, created_at, updated_at
+SELECT id, user_id, status, currency, subtotal_vnd, total_vnd, payment_reference, idempotency_key, expires_at, paid_at, delivery_started_at, delivered_at, cancelled_at, version, created_at, updated_at, bank_account_id, bank_bin_snapshot, bank_name_snapshot, bank_display_name_snapshot, bank_account_name_snapshot, encrypted_account_number_snapshot, account_number_nonce_snapshot, account_encryption_format_snapshot, account_key_version_snapshot, account_last4_snapshot
 FROM orders
 WHERE id = $1
   AND user_id = $2
@@ -136,6 +593,49 @@ func (q *Queries) GetOrderOwnedByUser(ctx context.Context, arg GetOrderOwnedByUs
 		&i.Version,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.BankAccountID,
+		&i.BankBinSnapshot,
+		&i.BankNameSnapshot,
+		&i.BankDisplayNameSnapshot,
+		&i.BankAccountNameSnapshot,
+		&i.EncryptedAccountNumberSnapshot,
+		&i.AccountNumberNonceSnapshot,
+		&i.AccountEncryptionFormatSnapshot,
+		&i.AccountKeyVersionSnapshot,
+		&i.AccountLast4Snapshot,
+	)
+	return i, err
+}
+
+const getProductForOrderCreation = `-- name: GetProductForOrderCreation :one
+SELECT products.id, products.name, products.price_vnd, products.delivery_type,
+       products.is_active AS product_active,
+       categories.is_active AS category_active
+FROM products
+JOIN categories ON categories.id = products.category_id
+WHERE products.id = $1
+FOR SHARE OF products, categories
+`
+
+type GetProductForOrderCreationRow struct {
+	ID             int64  `db:"id" json:"id"`
+	Name           string `db:"name" json:"name"`
+	PriceVnd       int64  `db:"price_vnd" json:"price_vnd"`
+	DeliveryType   string `db:"delivery_type" json:"delivery_type"`
+	ProductActive  bool   `db:"product_active" json:"product_active"`
+	CategoryActive bool   `db:"category_active" json:"category_active"`
+}
+
+func (q *Queries) GetProductForOrderCreation(ctx context.Context, productID int64) (GetProductForOrderCreationRow, error) {
+	row := q.db.QueryRow(ctx, getProductForOrderCreation, productID)
+	var i GetProductForOrderCreationRow
+	err := row.Scan(
+		&i.ID,
+		&i.Name,
+		&i.PriceVnd,
+		&i.DeliveryType,
+		&i.ProductActive,
+		&i.CategoryActive,
 	)
 	return i, err
 }
@@ -247,8 +747,171 @@ func (q *Queries) InsertOrderStatusHistory(ctx context.Context, arg InsertOrderS
 	return i, err
 }
 
+const listOrdersOwnedByTelegramUser = `-- name: ListOrdersOwnedByTelegramUser :many
+SELECT orders.id, orders.status, orders.total_vnd, orders.payment_reference,
+       orders.expires_at, orders.version, orders.created_at,
+       item.product_name, item.quantity
+FROM orders
+JOIN users ON users.id = orders.user_id
+JOIN LATERAL (
+    SELECT product_name, quantity
+    FROM order_items
+    WHERE order_id = orders.id
+    ORDER BY id
+    LIMIT 1
+) AS item ON true
+WHERE users.telegram_user_id = $1
+ORDER BY orders.created_at DESC, orders.id DESC
+LIMIT $3::integer OFFSET $2::integer
+`
+
+type ListOrdersOwnedByTelegramUserParams struct {
+	TelegramUserID int64 `db:"telegram_user_id" json:"telegram_user_id"`
+	PageOffset     int32 `db:"page_offset" json:"page_offset"`
+	PageLimit      int32 `db:"page_limit" json:"page_limit"`
+}
+
+type ListOrdersOwnedByTelegramUserRow struct {
+	ID               int64              `db:"id" json:"id"`
+	Status           string             `db:"status" json:"status"`
+	TotalVnd         int64              `db:"total_vnd" json:"total_vnd"`
+	PaymentReference string             `db:"payment_reference" json:"payment_reference"`
+	ExpiresAt        pgtype.Timestamptz `db:"expires_at" json:"expires_at"`
+	Version          int64              `db:"version" json:"version"`
+	CreatedAt        pgtype.Timestamptz `db:"created_at" json:"created_at"`
+	ProductName      string             `db:"product_name" json:"product_name"`
+	Quantity         int32              `db:"quantity" json:"quantity"`
+}
+
+func (q *Queries) ListOrdersOwnedByTelegramUser(ctx context.Context, arg ListOrdersOwnedByTelegramUserParams) ([]ListOrdersOwnedByTelegramUserRow, error) {
+	rows, err := q.db.Query(ctx, listOrdersOwnedByTelegramUser, arg.TelegramUserID, arg.PageOffset, arg.PageLimit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListOrdersOwnedByTelegramUserRow{}
+	for rows.Next() {
+		var i ListOrdersOwnedByTelegramUserRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.Status,
+			&i.TotalVnd,
+			&i.PaymentReference,
+			&i.ExpiresAt,
+			&i.Version,
+			&i.CreatedAt,
+			&i.ProductName,
+			&i.Quantity,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const lockOrderDetailOwnedByTelegramUser = `-- name: LockOrderDetailOwnedByTelegramUser :one
+SELECT orders.id, orders.user_id, orders.status, orders.currency, orders.subtotal_vnd, orders.total_vnd, orders.payment_reference, orders.idempotency_key, orders.expires_at, orders.paid_at, orders.delivery_started_at, orders.delivered_at, orders.cancelled_at, orders.version, orders.created_at, orders.updated_at, orders.bank_account_id, orders.bank_bin_snapshot, orders.bank_name_snapshot, orders.bank_display_name_snapshot, orders.bank_account_name_snapshot, orders.encrypted_account_number_snapshot, orders.account_number_nonce_snapshot, orders.account_encryption_format_snapshot, orders.account_key_version_snapshot, orders.account_last4_snapshot, item.id AS order_item_id, item.product_id,
+       item.product_name, item.unit_price_vnd, item.quantity,
+       item.line_total_vnd
+FROM orders
+JOIN users ON users.id = orders.user_id
+JOIN LATERAL (
+    SELECT id, order_id, product_id, product_name, unit_price_vnd, quantity, line_total_vnd, created_at FROM order_items
+    WHERE order_id = orders.id
+    ORDER BY id
+    LIMIT 1
+) AS item ON true
+WHERE orders.id = $1
+  AND users.telegram_user_id = $2
+FOR UPDATE OF orders
+`
+
+type LockOrderDetailOwnedByTelegramUserParams struct {
+	OrderID        int64 `db:"order_id" json:"order_id"`
+	TelegramUserID int64 `db:"telegram_user_id" json:"telegram_user_id"`
+}
+
+type LockOrderDetailOwnedByTelegramUserRow struct {
+	ID                              int64              `db:"id" json:"id"`
+	UserID                          int64              `db:"user_id" json:"user_id"`
+	Status                          string             `db:"status" json:"status"`
+	Currency                        string             `db:"currency" json:"currency"`
+	SubtotalVnd                     int64              `db:"subtotal_vnd" json:"subtotal_vnd"`
+	TotalVnd                        int64              `db:"total_vnd" json:"total_vnd"`
+	PaymentReference                string             `db:"payment_reference" json:"payment_reference"`
+	IdempotencyKey                  string             `db:"idempotency_key" json:"idempotency_key"`
+	ExpiresAt                       pgtype.Timestamptz `db:"expires_at" json:"expires_at"`
+	PaidAt                          pgtype.Timestamptz `db:"paid_at" json:"paid_at"`
+	DeliveryStartedAt               pgtype.Timestamptz `db:"delivery_started_at" json:"delivery_started_at"`
+	DeliveredAt                     pgtype.Timestamptz `db:"delivered_at" json:"delivered_at"`
+	CancelledAt                     pgtype.Timestamptz `db:"cancelled_at" json:"cancelled_at"`
+	Version                         int64              `db:"version" json:"version"`
+	CreatedAt                       pgtype.Timestamptz `db:"created_at" json:"created_at"`
+	UpdatedAt                       pgtype.Timestamptz `db:"updated_at" json:"updated_at"`
+	BankAccountID                   pgtype.Int8        `db:"bank_account_id" json:"bank_account_id"`
+	BankBinSnapshot                 pgtype.Text        `db:"bank_bin_snapshot" json:"bank_bin_snapshot"`
+	BankNameSnapshot                pgtype.Text        `db:"bank_name_snapshot" json:"bank_name_snapshot"`
+	BankDisplayNameSnapshot         pgtype.Text        `db:"bank_display_name_snapshot" json:"bank_display_name_snapshot"`
+	BankAccountNameSnapshot         pgtype.Text        `db:"bank_account_name_snapshot" json:"bank_account_name_snapshot"`
+	EncryptedAccountNumberSnapshot  []byte             `db:"encrypted_account_number_snapshot" json:"encrypted_account_number_snapshot"`
+	AccountNumberNonceSnapshot      []byte             `db:"account_number_nonce_snapshot" json:"account_number_nonce_snapshot"`
+	AccountEncryptionFormatSnapshot pgtype.Text        `db:"account_encryption_format_snapshot" json:"account_encryption_format_snapshot"`
+	AccountKeyVersionSnapshot       pgtype.Int4        `db:"account_key_version_snapshot" json:"account_key_version_snapshot"`
+	AccountLast4Snapshot            pgtype.Text        `db:"account_last4_snapshot" json:"account_last4_snapshot"`
+	OrderItemID                     int64              `db:"order_item_id" json:"order_item_id"`
+	ProductID                       int64              `db:"product_id" json:"product_id"`
+	ProductName                     string             `db:"product_name" json:"product_name"`
+	UnitPriceVnd                    int64              `db:"unit_price_vnd" json:"unit_price_vnd"`
+	Quantity                        int32              `db:"quantity" json:"quantity"`
+	LineTotalVnd                    int64              `db:"line_total_vnd" json:"line_total_vnd"`
+}
+
+func (q *Queries) LockOrderDetailOwnedByTelegramUser(ctx context.Context, arg LockOrderDetailOwnedByTelegramUserParams) (LockOrderDetailOwnedByTelegramUserRow, error) {
+	row := q.db.QueryRow(ctx, lockOrderDetailOwnedByTelegramUser, arg.OrderID, arg.TelegramUserID)
+	var i LockOrderDetailOwnedByTelegramUserRow
+	err := row.Scan(
+		&i.ID,
+		&i.UserID,
+		&i.Status,
+		&i.Currency,
+		&i.SubtotalVnd,
+		&i.TotalVnd,
+		&i.PaymentReference,
+		&i.IdempotencyKey,
+		&i.ExpiresAt,
+		&i.PaidAt,
+		&i.DeliveryStartedAt,
+		&i.DeliveredAt,
+		&i.CancelledAt,
+		&i.Version,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.BankAccountID,
+		&i.BankBinSnapshot,
+		&i.BankNameSnapshot,
+		&i.BankDisplayNameSnapshot,
+		&i.BankAccountNameSnapshot,
+		&i.EncryptedAccountNumberSnapshot,
+		&i.AccountNumberNonceSnapshot,
+		&i.AccountEncryptionFormatSnapshot,
+		&i.AccountKeyVersionSnapshot,
+		&i.AccountLast4Snapshot,
+		&i.OrderItemID,
+		&i.ProductID,
+		&i.ProductName,
+		&i.UnitPriceVnd,
+		&i.Quantity,
+		&i.LineTotalVnd,
+	)
+	return i, err
+}
+
 const lockOrderForUpdate = `-- name: LockOrderForUpdate :one
-SELECT id, user_id, status, currency, subtotal_vnd, total_vnd, payment_reference, idempotency_key, expires_at, paid_at, delivery_started_at, delivered_at, cancelled_at, version, created_at, updated_at
+SELECT id, user_id, status, currency, subtotal_vnd, total_vnd, payment_reference, idempotency_key, expires_at, paid_at, delivery_started_at, delivered_at, cancelled_at, version, created_at, updated_at, bank_account_id, bank_bin_snapshot, bank_name_snapshot, bank_display_name_snapshot, bank_account_name_snapshot, encrypted_account_number_snapshot, account_number_nonce_snapshot, account_encryption_format_snapshot, account_key_version_snapshot, account_last4_snapshot
 FROM orders
 WHERE id = $1
 FOR UPDATE
@@ -274,6 +937,39 @@ func (q *Queries) LockOrderForUpdate(ctx context.Context, id int64) (Order, erro
 		&i.Version,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.BankAccountID,
+		&i.BankBinSnapshot,
+		&i.BankNameSnapshot,
+		&i.BankDisplayNameSnapshot,
+		&i.BankAccountNameSnapshot,
+		&i.EncryptedAccountNumberSnapshot,
+		&i.AccountNumberNonceSnapshot,
+		&i.AccountEncryptionFormatSnapshot,
+		&i.AccountKeyVersionSnapshot,
+		&i.AccountLast4Snapshot,
+	)
+	return i, err
+}
+
+const lockUserForOrderCreation = `-- name: LockUserForOrderCreation :one
+SELECT id, telegram_user_id, username, display_name, status, ban_reason, last_seen_at, created_at, updated_at FROM users
+WHERE telegram_user_id = $1
+FOR SHARE
+`
+
+func (q *Queries) LockUserForOrderCreation(ctx context.Context, telegramUserID int64) (User, error) {
+	row := q.db.QueryRow(ctx, lockUserForOrderCreation, telegramUserID)
+	var i User
+	err := row.Scan(
+		&i.ID,
+		&i.TelegramUserID,
+		&i.Username,
+		&i.DisplayName,
+		&i.Status,
+		&i.BanReason,
+		&i.LastSeenAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
 	)
 	return i, err
 }
@@ -285,7 +981,7 @@ SET status = $1,
 WHERE id = $2
   AND status = $3
   AND version = $4
-RETURNING id, user_id, status, currency, subtotal_vnd, total_vnd, payment_reference, idempotency_key, expires_at, paid_at, delivery_started_at, delivered_at, cancelled_at, version, created_at, updated_at
+RETURNING id, user_id, status, currency, subtotal_vnd, total_vnd, payment_reference, idempotency_key, expires_at, paid_at, delivery_started_at, delivered_at, cancelled_at, version, created_at, updated_at, bank_account_id, bank_bin_snapshot, bank_name_snapshot, bank_display_name_snapshot, bank_account_name_snapshot, encrypted_account_number_snapshot, account_number_nonce_snapshot, account_encryption_format_snapshot, account_key_version_snapshot, account_last4_snapshot
 `
 
 type UpdateOrderStatusGuardedParams struct {
@@ -320,6 +1016,16 @@ func (q *Queries) UpdateOrderStatusGuarded(ctx context.Context, arg UpdateOrderS
 		&i.Version,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.BankAccountID,
+		&i.BankBinSnapshot,
+		&i.BankNameSnapshot,
+		&i.BankDisplayNameSnapshot,
+		&i.BankAccountNameSnapshot,
+		&i.EncryptedAccountNumberSnapshot,
+		&i.AccountNumberNonceSnapshot,
+		&i.AccountEncryptionFormatSnapshot,
+		&i.AccountKeyVersionSnapshot,
+		&i.AccountLast4Snapshot,
 	)
 	return i, err
 }
